@@ -535,15 +535,13 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
 
-  // SLA Met: fetch actual records (matches workflow's Get_SLA_Met_Cases "List rows")
-  // Workflow filter: statecode eq 1 and modifiedon ge/le (selects incidentid,cr7fe_new_handletime)
+  // SLA Met: matches workflow's Get_SLA_Met_Cases — Tier 1 resolved cases only
   const t1SLAMet = await safeFetchCount("SLA Met Cases",
-    `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
-  // FCR: fetch actual records (matches workflow's Get_FCR_Cases "List rows")
-  // Workflow filter: cr7fe_new_fcr eq true and modifiedon ge/le
+  // FCR: matches workflow's Get_FCR_Cases — Tier 1 FCR only
   const t1FCR = await safeFetchCount("FCR Cases",
-    `incidents?$filter=cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
   const t1Escalated = await safeCount("Tier 1 Escalated",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
@@ -594,12 +592,12 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   }
 
-  // ── Resolution time (sample — resolved cases by modifiedon, uses cr7fe_new_handletime) ──
+  // ── Resolution time (Tier 1 resolved cases only) ──
   let avgResTime = "N/A";
   try {
     progress("Fetching resolution times...");
     const resolved = await d365Fetch(
-      `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=100&$orderby=modifiedon desc`
+      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
       // Try cr7fe_new_handletime first (workflow's field), fallback to createdon→modifiedon diff
@@ -641,7 +639,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const phoneAnswered = Math.max(0, phoneIncoming - phoneVoicemails);
 
   const allCases = t1Cases + t2Cases + t3Cases;
-  const allResolved = t1SLAMet; // t1SLAMet = statecode eq 1 by modifiedon = all resolved cases (matches workflow's Get Resolved Cases)
+  const allResolved = t1SLAMet + t2Resolved + t3Resolved;
 
   return {
     tier1: {
