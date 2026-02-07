@@ -633,7 +633,29 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     `phonecalls?$filter=directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
   const phoneTotal = await safeCount("Phone Total",
     `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  const phoneAnswered = Math.max(0, phoneIncoming - phoneVoicemails);
+  // Answered = incoming calls with actual duration (not missed/abandoned)
+  const phoneAnswered = await safeCount("Phone Answered",
+    `phonecalls?$filter=directioncode eq false and actualdurationminutes gt 0 and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  // Abandoned = Total incoming - Answered (matches workflow calculation)
+  const phoneAbandoned = Math.max(0, phoneIncoming - phoneAnswered);
+  // Answer Rate
+  const phoneAnswerRate = phoneIncoming > 0 ? Math.round(phoneAnswered / phoneIncoming * 100) : 0;
+
+  // Avg Phone AHT from actualdurationminutes
+  let phoneAHT = "N/A";
+  try {
+    progress("Fetching Phone AHT...");
+    const ahtData = await d365Fetch(
+      `phonecalls?$filter=directioncode eq false and actualdurationminutes gt 0 and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes&$top=5000`
+    );
+    if (ahtData.value?.length > 0) {
+      const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes)).filter(n => !isNaN(n) && n > 0);
+      if (durations.length > 0) {
+        const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+        phoneAHT = `${avg} min`;
+      }
+    }
+  } catch (err) { errors.push(`Phone AHT: ${err.message}`); }
 
   const allCases = t1Cases + t2Cases + t3Cases;
   const allResolved = t1SLAMet + t2Resolved + t3Resolved;
@@ -662,8 +684,8 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
       slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A"),
     },
     csat: { responses: csatResponses, avgScore: csatAvg },
-    phone: { totalCalls: phoneTotal, incoming: phoneIncoming, outgoing: phoneOutgoing, answered: phoneAnswered, voicemails: phoneVoicemails },
-    overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: phoneAnswered, abandonedCalls: phoneVoicemails },
+    phone: { totalCalls: phoneTotal, incoming: phoneIncoming, outgoing: phoneOutgoing, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: phoneVoicemails, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
+    overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: phoneAnswered, abandonedCalls: phoneAbandoned },
     timeline: [],
     source: "d365",
     errors,
@@ -859,8 +881,9 @@ function TierSection({ tier, data, members }) {
       {tier === 1 && data.phone && (() => {
         const totalCalls = data.phone.totalCalls ?? 0;
         const answered = data.phone.answered ?? 0;
-        const abandoned = data.phone.voicemails ?? 0;
-        const answerRate = totalCalls > 0 ? Math.round(answered / totalCalls * 100) : 0;
+        const abandoned = data.phone.abandoned ?? 0;
+        const answerRate = data.phone.answerRate ?? 0;
+        const avgAHT = data.phone.avgAHT ?? "N/A";
         const MetricRow = ({ icon, label, value, accent, badge }) => (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -882,7 +905,7 @@ function TierSection({ tier, data, members }) {
             <MetricRow icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
             <MetricRow icon="❌" label="Abandoned Calls" value={abandoned} accent="#E5544B" badge={abandoned > 0 ? "miss" : "met"} />
             <MetricRow icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
-            <MetricRow icon="⏱️" label="Avg Phone AHT" value="N/A" accent={C.textMid} />
+            <MetricRow icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
 
           {/* Email Metrics */}
