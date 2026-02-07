@@ -1272,8 +1272,8 @@ function ConnectionBar({ d365Connected, isLive, onOpenSettings }) {
           <span style={{ color: C.textLight }}>{d365Connected ? "Connected" : "Not connected"}</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: isLive ? C.green : C.blue }} />
-          <span style={{ fontWeight: 600, color: isLive ? C.green : C.blue }}>{isLive ? "Live" : "Demo"}</span>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green }} />
+          <span style={{ fontWeight: 600, color: C.green }}>Live</span>
         </span>
       </div>
       <button onClick={onOpenSettings} style={{ background: "none", border: "none", fontSize: 11, fontWeight: 600, color: C.primary, cursor: "pointer", textDecoration: "underline" }}>⚙️ Configure</button>
@@ -1338,15 +1338,6 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
             </div>
           )}
 
-          {/* ── Mode Toggle ── */}
-          <div style={{ background: C.bg, borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, marginTop: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
-              <div onClick={() => setLocal((p) => ({ ...p, live: !p.live }))} style={{ width: 44, height: 24, borderRadius: 12, padding: 2, background: local.live ? C.green : C.border, transition: "background 0.2s", cursor: "pointer" }}>
-                <div style={{ width: 20, height: 20, borderRadius: 10, background: "#fff", transform: local.live ? "translateX(20px)" : "translateX(0)", transition: "transform 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }} />
-              </div>
-              <div><div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{local.live ? "🟢 Live Data Mode" : "🔵 Demo Data Mode"}</div><div style={{ fontSize: 11, color: C.textMid }}>{local.live ? "Pulling from Dynamics 365" : "Simulated demo data"}</div></div>
-            </label>
-          </div>
         </div>
         <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
@@ -1441,7 +1432,7 @@ function Dashboard({ user, onLogout }) {
   const [isRunning, setIsRunning] = useState(false);
   const [runProgress, setRunProgress] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [apiConfig, setApiConfig] = useState({ live: false });
+  const [apiConfig, setApiConfig] = useState({ live: true });
   const [d365Account, setD365Account] = useState(null);
   const [liveErrors, setLiveErrors] = useState([]);
   const reportRef = useRef(null);
@@ -1532,7 +1523,7 @@ function Dashboard({ user, onLogout }) {
   }, [selectedQueue, d365Account]);
 
   const canRun = selectedMembers.length > 0 || (d365Account && selectedQueue);
-  const isLive = apiConfig.live && d365Account;
+  const isLive = !!d365Account;
 
   const setPreset = (type) => {
     setReportType(type);
@@ -1564,8 +1555,7 @@ function Dashboard({ user, onLogout }) {
     setMemberData([]);
 
     try {
-      if (isLive) {
-        if (selectedMembers.length > 0) {
+      if (selectedMembers.length > 0) {
           // Per-member mode — fetch each member's data
           const results = [];
           const allErrors = [];
@@ -1588,52 +1578,6 @@ function Dashboard({ user, onLogout }) {
           setData(d);
           if (d.errors?.length > 0) setLiveErrors(d.errors);
         }
-      } else {
-        // Demo mode
-        setRunProgress("Generating demo data...");
-        await new Promise((r) => setTimeout(r, 800));
-        if (selectedMembers.length > 0) {
-          // Generate demo per-member data
-          const results = selectedMembers.map((memberId, idx) => {
-            const member = teamMembers.find(m => m.id === memberId);
-            if (!member) return null;
-            const seed = seedFrom(startDate + endDate + memberId);
-            const r = rng(seed);
-            const total = Math.round(5 + r(1) * 20);
-            const resolved = Math.round(total * (0.5 + r(2) * 0.45));
-            const slaMet = Math.round(total * (0.6 + r(3) * 0.35));
-            const fcr = Math.round(total * (0.5 + r(4) * 0.45));
-            const esc = Math.round(total * (0.01 + r(5) * 0.12));
-            const active = total - resolved;
-            const emailC = Math.round(2 + r(6) * 8);
-            const emailR = Math.round(emailC * (0.5 + r(7) * 0.45));
-            const csatR = Math.round(r(8) * 4);
-            const csatA = csatR > 0 ? +(3 + r(9) * 1.8).toFixed(1) : "N/A";
-            const resTime = +(1 + r(10) * 7).toFixed(1);
-            const incoming = Math.round(2 + r(11) * 8);
-            const vm = Math.round(r(12) * 2);
-            const answered = Math.max(0, incoming - vm);
-            const outgoing = Math.round(r(13) * 4);
-            const created = Math.round(total * (0.5 + r(14) * 0.4));
-            return {
-              member, totalCases: total, resolvedCases: resolved, activeCases: active,
-              slaMet, slaCompliance: total ? Math.round(slaMet / total * 100) : "N/A",
-              casesCreatedBy: created,
-              fcrCases: fcr, fcrRate: total ? Math.round(fcr / total * 100) : "N/A",
-              escalatedCases: esc, escalationRate: total ? Math.round(esc / total * 100) : "N/A",
-              emailCases: emailC, emailResolved: emailR,
-              totalPhoneCalls: incoming + outgoing, incomingCalls: incoming, outgoingCalls: outgoing, answeredLive: answered, voicemails: vm,
-              csatResponses: csatR, csatAvg: csatA,
-              avgResTime: `${resTime} hrs`, errors: [],
-            };
-          }).filter(Boolean);
-          setMemberData(results);
-          setData({ ...buildCombinedData(results), source: "demo" });
-        } else {
-          const d = generateDemoData(startDate, endDate, selectedMembers);
-          setData(d);
-        }
-      }
     } catch (err) {
       setLiveErrors([err.message]);
     }
@@ -1774,7 +1718,7 @@ function Dashboard({ user, onLogout }) {
 
           {/* Run Button */}
           <button onClick={handleRun} disabled={!canRun || isRunning} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: canRun ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, color: canRun ? "#fff" : C.textLight, fontSize: 15, fontWeight: 700, cursor: canRun ? "pointer" : "not-allowed", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: canRun ? "0 4px 20px rgba(232,101,58,0.35)" : "none", opacity: isRunning ? 0.7 : 1 }}>
-            {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report {isLive ? "(Live)" : "(Demo)"}</>}
+            {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report (Live)</>}
           </button>
           {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a tier to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
@@ -1788,7 +1732,7 @@ function Dashboard({ user, onLogout }) {
               <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h2>
               <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>
                 Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>.
-                {isLive ? <> Live data from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</> : <> Data pulls from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</>}
+                {<> Live data from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</>}
               </p>
               <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
                 {[{ icon: "👥", label: `${selectedMembers.length} members`, ok: selectedMembers.length > 0 }, { icon: "📊", label: reportType === "daily" ? "Daily Report" : reportType === "weekly" ? "Weekly Report" : "Custom Range", ok: true }, { icon: "📅", label: `${startDate} → ${endDate}`, ok: startDate && endDate }].map((s, i) => <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: s.ok ? C.greenLight + "22" : C.accentLight + "22", border: `1px solid ${s.ok ? C.greenLight + "44" : C.accentLight + "44"}`, fontSize: 12, fontWeight: 600, color: s.ok ? C.green : C.accent, display: "flex", alignItems: "center", gap: 6 }}><span>{s.icon}</span> {s.label} {s.ok ? "✓" : "✗"}</div>)}
@@ -1809,7 +1753,7 @@ function Dashboard({ user, onLogout }) {
                     {selectedQueue && <span>🏢 {selectedQueue === "all" ? "All Tiers" : (queues.find(q => q.id === selectedQueue)?.tierLabel?.replace(" 🔒", "") || "Tier")}</span>}
                     <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All tier members"}</span>
                     <span>📅 {dateLabel}</span>
-                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: data.source === "live" ? C.greenLight + "33" : data.source === "d365" ? C.greenLight + "33" : "#0078D415", color: data.source === "live" || data.source === "d365" ? C.green : "#0078D4", fontWeight: 600 }}>{data.source === "live" || data.source === "d365" ? "🟢 Live Data" : "🔵 Demo"}</span>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: C.greenLight + "33", color: C.green, fontWeight: 600 }}>🟢 Live Data</span>
                   </div>
                 </div>
               </div>
@@ -1853,7 +1797,7 @@ function Dashboard({ user, onLogout }) {
                 </>
               )}
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
-                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live Dynamics 365 data" : "with demo data"} by Service and Operations Dashboard</p>
+                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated from live Dynamics 365 data by Service and Operations Dashboard</p>
               </div>
               <ChartsPanel data={data} />
             </div>
