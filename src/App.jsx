@@ -231,39 +231,62 @@ async function fetchD365Queues() {
 
 /* ─── FETCH QUEUE MEMBERS FROM D365 ─── */
 async function fetchD365QueueMembers(queueId) {
+  // Approach 1: queuememberships entity
   try {
-    // Try fetching queue members via queuemembership
     const data = await d365Fetch(
-      `systemusers?$filter=queueid eq ${queueId} and isdisabled eq false&$select=systemuserid,fullname,title,jobtitle,internalemailaddress&$orderby=fullname asc`
+      `queues(${queueId})/queue_membership?$select=systemuserid,fullname,title,jobtitle,internalemailaddress&$filter=isdisabled eq false`
     );
     if (data.value?.length > 0) return mapD365Users(data.value);
-  } catch {}
+  } catch (e) { console.log("Approach 1 failed:", e.message); }
 
+  // Approach 2: queuememberships_association
   try {
-    // Alternative: fetch via queue items
     const data = await d365Fetch(
-      `queueitems?$filter=_queueid_value eq ${queueId} and statecode eq 0&$expand=workerid_systemuser($select=systemuserid,fullname,title,jobtitle,internalemailaddress)&$top=100`
+      `queues(${queueId})/queuemembership_association?$select=systemuserid,fullname,title,jobtitle,internalemailaddress`
     );
-    const users = (data.value || [])
-      .map(qi => qi.workerid_systemuser)
-      .filter(Boolean);
-    // Deduplicate
-    const seen = new Set();
-    const unique = users.filter(u => {
-      if (seen.has(u.systemuserid)) return false;
-      seen.add(u.systemuserid);
-      return true;
-    });
-    if (unique.length > 0) return mapD365Users(unique);
-  } catch {}
+    if (data.value?.length > 0) return mapD365Users(data.value);
+  } catch (e) { console.log("Approach 2 failed:", e.message); }
 
+  // Approach 3: FetchXML query for queue membership
   try {
-    // Another alternative: expand queue membership
+    const fetchXml = encodeURIComponent(`<fetch><entity name="systemuser"><attribute name="systemuserid"/><attribute name="fullname"/><attribute name="title"/><attribute name="jobtitle"/><attribute name="internalemailaddress"/><filter><condition attribute="isdisabled" operator="eq" value="0"/></filter><link-entity name="queuemembership" from="systemuserid" to="systemuserid" intersect="true"><link-entity name="queue" from="queueid" to="queueid"><filter><condition attribute="queueid" operator="eq" value="${queueId}"/></filter></link-entity></link-entity></entity></fetch>`);
+    const data = await d365Fetch(`systemusers?fetchXml=${fetchXml}`);
+    if (data.value?.length > 0) return mapD365Users(data.value);
+  } catch (e) { console.log("Approach 3 failed:", e.message); }
+
+  // Approach 4: Get cases assigned to this queue and find unique owners
+  try {
     const data = await d365Fetch(
-      `queues(${queueId})?$expand=queue_membership($select=systemuserid,fullname,title,jobtitle,internalemailaddress;$filter=isdisabled eq false)`
+      `incidents?$filter=_queueid_value eq ${queueId}&$select=_ownerid_value&$top=200`
     );
-    if (data.queue_membership?.length > 0) return mapD365Users(data.queue_membership);
-  } catch {}
+    if (data.value?.length > 0) {
+      const ownerIds = [...new Set(data.value.map(c => c._ownerid_value).filter(Boolean))];
+      if (ownerIds.length > 0) {
+        const filterParts = ownerIds.slice(0, 15).map(id => `systemuserid eq ${id}`).join(" or ");
+        const users = await d365Fetch(
+          `systemusers?$filter=(${filterParts}) and isdisabled eq false&$select=systemuserid,fullname,title,jobtitle,internalemailaddress`
+        );
+        if (users.value?.length > 0) return mapD365Users(users.value);
+      }
+    }
+  } catch (e) { console.log("Approach 4 failed:", e.message); }
+
+  // Approach 5: Get queue items and find workers
+  try {
+    const data = await d365Fetch(
+      `queueitems?$filter=_queueid_value eq ${queueId}&$select=_workerid_value&$top=200`
+    );
+    if (data.value?.length > 0) {
+      const workerIds = [...new Set(data.value.map(qi => qi._workerid_value).filter(Boolean))];
+      if (workerIds.length > 0) {
+        const filterParts = workerIds.slice(0, 15).map(id => `systemuserid eq ${id}`).join(" or ");
+        const users = await d365Fetch(
+          `systemusers?$filter=(${filterParts}) and isdisabled eq false&$select=systemuserid,fullname,title,jobtitle,internalemailaddress`
+        );
+        if (users.value?.length > 0) return mapD365Users(users.value);
+      }
+    }
+  } catch (e) { console.log("Approach 5 failed:", e.message); }
 
   return [];
 }
@@ -1155,7 +1178,7 @@ function Dashboard({ user, onLogout }) {
     }
   }, [selectedQueue, d365Account]);
 
-  const canRun = selectedMembers.length > 0;
+  const canRun = selectedMembers.length > 0 || (d365Account && selectedQueue);
   const isLive = apiConfig.live && d365Account;
 
   const setPreset = (type) => {
@@ -1274,7 +1297,7 @@ function Dashboard({ user, onLogout }) {
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members {loadingMembers && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading from D365...</span>}</div>
             <MultiMemberSelect selected={selectedMembers} onChange={setSelectedMembers} members={teamMembers} />
             {d365Account && selectedQueue && !loadingMembers && teamMembers.length === 0 && (
-              <div style={{ marginTop: 6, fontSize: 11, color: C.orange, padding: "8px 10px", background: C.orangeLight, borderRadius: 8 }}>No members found in this queue. Try selecting a different queue, or members may not be assigned.</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: C.blue, padding: "8px 10px", background: C.blueLight, borderRadius: 8 }}>No individual members found — you can still run the report using the queue's case data.</div>
             )}
             {selectedMembers.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
               {selectedMembers.slice(0, 4).map((id) => { const m = teamMembers.find((t) => t.id === id); const idx = teamMembers.indexOf(m); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: PIE_COLORS[idx % PIE_COLORS.length] + "18", color: PIE_COLORS[idx % PIE_COLORS.length], fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setSelectedMembers(selectedMembers.filter((s) => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
@@ -1321,7 +1344,7 @@ function Dashboard({ user, onLogout }) {
           <button onClick={handleRun} disabled={!canRun || isRunning} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: canRun ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, color: canRun ? "#fff" : C.textLight, fontSize: 15, fontWeight: 700, cursor: canRun ? "pointer" : "not-allowed", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: canRun ? "0 4px 20px rgba(232,101,58,0.35)" : "none", opacity: isRunning ? 0.7 : 1 }}>
             {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report {isLive ? "(Live)" : "(Demo)"}</>}
           </button>
-          {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>Select at least 1 team member</div>}
+          {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a queue to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
         </div>
 
