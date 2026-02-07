@@ -25,7 +25,7 @@ const MSAL_CONFIG = {
   },
 };
 
-const D365_SCOPE = "https://servingintel.crm.dynamics.com/.default";
+const D365_SCOPE = "https://servingintel.crm.dynamics.com/user_impersonation";
 const D365_BASE = "https://servingintel.crm.dynamics.com/api/data/v9.2";
 
 let msalInstance = null;
@@ -64,7 +64,7 @@ async function msalLogin() {
   await msal.initialize();
   try {
     const result = await msal.loginPopup({
-      scopes: [D365_SCOPE, "User.Read"],
+      scopes: [D365_SCOPE],
     });
     return result;
   } catch (err) {
