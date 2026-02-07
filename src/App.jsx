@@ -148,7 +148,6 @@ const TARGETS = {
   answer_rate: { value: 95, unit: "%", compare: "gte", label: ">95%" },
   avg_phone_aht: { value: 6, unit: " min", compare: "lte", label: "<6 min" },
   csat_score: { value: 4.0, unit: "/5", compare: "gte", label: "4.0+" },
-  email_sla: { value: 90, unit: "%", compare: "gte", label: "90%" },
 };
 
 function checkTarget(metricKey, value) {
@@ -467,15 +466,13 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const slaCompliance = totalCases > 0 ? Math.round(slaMet / totalCases * 100) : "N/A";
   const fcrRate = totalCases > 0 ? Math.round(fcrCases / totalCases * 100) : "N/A";
   const escalationRate = totalCases > 0 ? Math.round(escalatedCases / totalCases * 100) : "N/A";
-  // Workflow workaround: treat resolved email cases as 100% SLA
-  const emailSla = emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A");
 
   return {
     member,
     totalCases, resolvedCases, activeCases, slaMet, slaCompliance,
     casesCreatedBy,
     fcrCases, fcrRate, escalatedCases, escalationRate,
-    emailCases, emailResolved, emailSla,
+    emailCases, emailResolved,
     totalPhoneCalls, incomingCalls, outgoingCalls, answeredLive, voicemails,
     csatResponses, csatAvg,
     avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
@@ -817,18 +814,10 @@ function TierSection({ tier, data, members }) {
     const hrs = parseFloat(d.avgResolutionTime);
     metrics.push({ label: "Avg Resolution Time", value: isNaN(hrs) ? "N/A" : hrs, target: 6, unit: " hrs" });
   }
-  // Add email & CSAT if tier 1
-  if (tier === 1 && data.email) {
-    metrics.push({ label: "Email SLA", value: data.email.slaCompliance, target: 90, unit: "%" });
-  }
+  // Add CSAT if tier 1
   if (tier === 1 && data.csat) {
     const csatPct = data.csat.avgScore !== "N/A" ? Math.round(data.csat.avgScore / 5 * 100) : "N/A";
     metrics.push({ label: "CSAT Score", value: data.csat.avgScore, target: 4.0, unit: "/5" });
-  }
-  // Phone metrics for tier 1
-  if (tier === 1 && data.phone) {
-    metrics.push({ label: "Answer Rate", value: data.phone.answerRate, target: 95, unit: "%" });
-    metrics.push({ label: "Avg Handle Time", value: data.phone.avgAHT, target: 6, unit: " min" });
   }
 
   return (
@@ -866,35 +855,49 @@ function TierSection({ tier, data, members }) {
         ))}
       </div>
 
-      {/* Phone Activity — Tier 1 only */}
-      {tier === 1 && data.phone && (
-        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>📞</span> Phone Activity — Team Total
-          </div>
-          {[
-            { icon: "📥", label: "Total Incoming Calls", value: data.phone.incoming ?? 0, accent: C.blue },
-            { icon: "✅", label: "Answered Live", value: data.phone.answered ?? 0, accent: "#2D9D78" },
-            { icon: "📤", label: "Outgoing Calls", value: data.phone.outgoing ?? 0, accent: C.textDark },
-            { icon: "📱", label: "Voicemails (VM)", value: data.phone.voicemails ?? 0, accent: C.orange },
-          ].map((ps, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 16 }}>{ps.icon}</span>
-                <span style={{ fontSize: 13, color: C.textMid }}>{ps.label}</span>
-              </div>
-              <span style={{ fontSize: 18, fontWeight: 700, color: ps.accent, fontFamily: "'Space Mono', monospace" }}>{ps.value}</span>
-            </div>
-          ))}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
+      {/* Phone Metrics — Tier 1 only */}
+      {tier === 1 && data.phone && (() => {
+        const totalCalls = data.phone.totalCalls ?? 0;
+        const answered = data.phone.answered ?? 0;
+        const abandoned = data.phone.voicemails ?? 0;
+        const answerRate = totalCalls > 0 ? Math.round(answered / totalCalls * 100) : 0;
+        const MetricRow = ({ icon, label, value, accent, badge }) => (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 16 }}>📊</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>Total Phone Activities</span>
+              <span style={{ fontSize: 15 }}>{icon}</span>
+              <span style={{ fontSize: 13, color: C.textMid }}>{label}</span>
             </div>
-            <span style={{ fontSize: 22, fontWeight: 800, color: t.color, fontFamily: "'Space Mono', monospace" }}>{data.phone.totalCalls ?? 0}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
+              {badge && <span style={{ fontSize: 11, width: 18, height: 18, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: badge === "met" ? "#2D9D78" : "#E5544B", color: "#fff" }}>{badge === "met" ? "✓" : "!"}</span>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+        return (<>
+          <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }}>📞</span> PHONE METRICS
+            </div>
+            <MetricRow icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
+            <MetricRow icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
+            <MetricRow icon="❌" label="Abandoned Calls" value={abandoned} accent="#E5544B" badge={abandoned > 0 ? "miss" : "met"} />
+            <MetricRow icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
+            <MetricRow icon="⏱️" label="Avg Phone AHT" value="N/A" accent={C.textMid} />
+          </div>
+
+          {/* Email Metrics */}
+          {data.email && (
+            <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.blue, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>📧</span> EMAIL METRICS
+              </div>
+              <MetricRow icon="📨" label="Total Email Cases" value={data.email.total ?? 0} accent={C.textDark} />
+              <MetricRow icon="💬" label="Responded" value={data.email.responded ?? 0} accent={C.orange} badge={(data.email.responded ?? 0) > 0 ? "miss" : "met"} />
+              <MetricRow icon="✅" label="Resolved" value={data.email.resolved ?? 0} accent="#2D9D78" badge="met" />
+            </div>
+          )}
+        </>);
+      })()}
     </div>
   );
 }
@@ -964,7 +967,6 @@ function MemberSection({ memberData, index }) {
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
     { label: "Avg Resolution Time", value: parseFloat(d.avgResTime) || "N/A", target: 6, unit: " hrs" },
-    { label: "Email SLA", value: d.emailSla, target: 90, unit: "%" },
     { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
   ] : [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
@@ -1528,7 +1530,7 @@ function Dashboard({ user, onLogout }) {
               casesCreatedBy: created,
               fcrCases: fcr, fcrRate: total ? Math.round(fcr / total * 100) : "N/A",
               escalatedCases: esc, escalationRate: total ? Math.round(esc / total * 100) : "N/A",
-              emailCases: emailC, emailResolved: emailR, emailSla: emailC ? Math.round(emailR / emailC * 100) : "N/A",
+              emailCases: emailC, emailResolved: emailR,
               totalPhoneCalls: incoming + outgoing, incomingCalls: incoming, outgoingCalls: outgoing, answeredLive: answered, voicemails: vm,
               csatResponses: csatR, csatAvg: csatA,
               avgResTime: `${resTime} hrs`, errors: [],
