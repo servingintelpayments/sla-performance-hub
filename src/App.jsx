@@ -199,45 +199,85 @@ const DEMO_TEAM_MEMBERS = [
   { id: "demo3", name: "Demo Agent 3", role: "Agent II", avatar: "D3", tier: 2 },
 ];
 
-/* ─── FETCH TEAM MEMBERS FROM D365 ─── */
-async function fetchD365TeamMembers() {
+/* ─── FETCH QUEUES FROM D365 ─── */
+async function fetchD365Queues() {
   try {
-    // Fetch active users who handle cases (customer service reps)
     const data = await d365Fetch(
-      `systemusers?$filter=isdisabled eq false and serviceid ne null or isdisabled eq false and title ne null&$select=systemuserid,fullname,title,internalemailaddress,jobtitle&$orderby=fullname asc&$top=100`
+      `queues?$filter=statecode eq 0 and queueviewtype eq 0&$select=queueid,name,description,emailaddress&$orderby=name asc`
     );
-    if (!data.value?.length) {
-      // Broader query if first returns nothing
-      const data2 = await d365Fetch(
-        `systemusers?$filter=isdisabled eq false and accessmode ne 3 and accessmode ne 5&$select=systemuserid,fullname,title,internalemailaddress,jobtitle&$orderby=fullname asc&$top=100`
-      );
-      return mapD365Users(data2.value || []);
-    }
-    return mapD365Users(data.value);
+    return (data.value || []).map(q => ({
+      id: q.queueid,
+      name: q.name,
+      description: q.description || "",
+      email: q.emailaddress || "",
+    }));
   } catch (err) {
-    console.error("Failed to fetch D365 users:", err);
-    // Try simplest possible query
+    console.error("Failed to fetch queues:", err);
+    // Try without queueviewtype filter
     try {
       const data = await d365Fetch(
-        `systemusers?$filter=isdisabled eq false&$select=systemuserid,fullname,title,internalemailaddress&$orderby=fullname asc&$top=50`
+        `queues?$filter=statecode eq 0&$select=queueid,name,description,emailaddress&$orderby=name asc&$top=50`
       );
-      return mapD365Users(data.value || []);
+      return (data.value || []).map(q => ({
+        id: q.queueid,
+        name: q.name,
+        description: q.description || "",
+        email: q.emailaddress || "",
+      }));
     } catch {
       return [];
     }
   }
 }
 
+/* ─── FETCH QUEUE MEMBERS FROM D365 ─── */
+async function fetchD365QueueMembers(queueId) {
+  try {
+    // Try fetching queue members via queuemembership
+    const data = await d365Fetch(
+      `systemusers?$filter=queueid eq ${queueId} and isdisabled eq false&$select=systemuserid,fullname,title,jobtitle,internalemailaddress&$orderby=fullname asc`
+    );
+    if (data.value?.length > 0) return mapD365Users(data.value);
+  } catch {}
+
+  try {
+    // Alternative: fetch via queue items
+    const data = await d365Fetch(
+      `queueitems?$filter=_queueid_value eq ${queueId} and statecode eq 0&$expand=workerid_systemuser($select=systemuserid,fullname,title,jobtitle,internalemailaddress)&$top=100`
+    );
+    const users = (data.value || [])
+      .map(qi => qi.workerid_systemuser)
+      .filter(Boolean);
+    // Deduplicate
+    const seen = new Set();
+    const unique = users.filter(u => {
+      if (seen.has(u.systemuserid)) return false;
+      seen.add(u.systemuserid);
+      return true;
+    });
+    if (unique.length > 0) return mapD365Users(unique);
+  } catch {}
+
+  try {
+    // Another alternative: expand queue membership
+    const data = await d365Fetch(
+      `queues(${queueId})?$expand=queue_membership($select=systemuserid,fullname,title,jobtitle,internalemailaddress;$filter=isdisabled eq false)`
+    );
+    if (data.queue_membership?.length > 0) return mapD365Users(data.queue_membership);
+  } catch {}
+
+  return [];
+}
+
 function mapD365Users(users) {
   return users
-    .filter(u => u.fullname && !u.fullname.includes("SYSTEM") && !u.fullname.includes("Integration"))
+    .filter(u => u.fullname && !u.fullname.startsWith("#") && !u.fullname.includes("SYSTEM") && !u.fullname.includes("Integration") && !u.fullname.includes("Builder") && !u.fullname.includes("Apollo") && !u.fullname.includes("Tools"))
     .map(u => {
       const name = u.fullname || "Unknown";
       const parts = name.split(" ");
       const avatar = parts.length >= 2
         ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
         : name.substring(0, 2).toUpperCase();
-      // Try to guess tier from title/jobtitle
       const titleLower = (u.title || u.jobtitle || "").toLowerCase();
       let tier = 1;
       if (titleLower.includes("senior") || titleLower.includes("manager") || titleLower.includes("relationship") || titleLower.includes("vip")) tier = 3;
@@ -1054,6 +1094,9 @@ function LoginPage({ onLogin }) {
    MAIN DASHBOARD — SIDEBAR LAYOUT
    ═══════════════════════════════════════════════════════ */
 function Dashboard({ user, onLogout }) {
+  const [queues, setQueues] = useState([]);
+  const [selectedQueue, setSelectedQueue] = useState(null);
+  const [loadingQueues, setLoadingQueues] = useState(false);
   const [teamMembers, setTeamMembers] = useState(DEMO_TEAM_MEMBERS);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState([]);
@@ -1083,22 +1126,35 @@ function Dashboard({ user, onLogout }) {
     })();
   }, []);
 
-  // Fetch team members from D365 when connected
+  // Fetch queues from D365 when connected
   useEffect(() => {
     if (d365Account) {
-      setLoadingMembers(true);
-      fetchD365TeamMembers().then(members => {
-        if (members.length > 0) {
-          setTeamMembers(members);
-          setSelectedMembers([]);
-        }
-        setLoadingMembers(false);
-      }).catch(() => setLoadingMembers(false));
+      setLoadingQueues(true);
+      fetchD365Queues().then(q => {
+        setQueues(q);
+        setLoadingQueues(false);
+      }).catch(() => setLoadingQueues(false));
     } else {
+      setQueues([]);
+      setSelectedQueue(null);
       setTeamMembers(DEMO_TEAM_MEMBERS);
       setSelectedMembers([]);
     }
   }, [d365Account]);
+
+  // Fetch queue members when a queue is selected
+  useEffect(() => {
+    if (selectedQueue && d365Account) {
+      setLoadingMembers(true);
+      setSelectedMembers([]);
+      fetchD365QueueMembers(selectedQueue).then(members => {
+        setTeamMembers(members.length > 0 ? members : []);
+        setLoadingMembers(false);
+      }).catch(() => { setTeamMembers([]); setLoadingMembers(false); });
+    } else if (!d365Account) {
+      setTeamMembers(DEMO_TEAM_MEMBERS);
+    }
+  }, [selectedQueue, d365Account]);
 
   const canRun = selectedMembers.length > 0;
   const isLive = apiConfig.live && d365Account;
@@ -1189,10 +1245,38 @@ function Dashboard({ user, onLogout }) {
         <div className="no-print" style={{ width: 310, minWidth: 310, background: C.card, borderRight: `1px solid ${C.border}`, padding: "24px 20px", minHeight: "calc(100vh - 110px)", display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>Configure Report</div>
 
+          {/* Queue Selector (when D365 connected) */}
+          {d365Account && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>📋</span> Queue
+                {loadingQueues && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading...</span>}
+              </div>
+              <select
+                value={selectedQueue || ""}
+                onChange={(e) => setSelectedQueue(e.target.value || null)}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", cursor: "pointer", appearance: "auto" }}
+              >
+                <option value="">Select a queue...</option>
+                {queues.map(q => (
+                  <option key={q.id} value={q.id}>{q.name}</option>
+                ))}
+              </select>
+              {selectedQueue && (
+                <div style={{ marginTop: 6, fontSize: 10, color: C.textLight }}>
+                  {queues.find(q => q.id === selectedQueue)?.description || ""}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Team Members */}
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members {loadingMembers && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading from D365...</span>}</div>
             <MultiMemberSelect selected={selectedMembers} onChange={setSelectedMembers} members={teamMembers} />
+            {d365Account && selectedQueue && !loadingMembers && teamMembers.length === 0 && (
+              <div style={{ marginTop: 6, fontSize: 11, color: C.orange, padding: "8px 10px", background: C.orangeLight, borderRadius: 8 }}>No members found in this queue. Try selecting a different queue, or members may not be assigned.</div>
+            )}
             {selectedMembers.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
               {selectedMembers.slice(0, 4).map((id) => { const m = teamMembers.find((t) => t.id === id); const idx = teamMembers.indexOf(m); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: PIE_COLORS[idx % PIE_COLORS.length] + "18", color: PIE_COLORS[idx % PIE_COLORS.length], fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setSelectedMembers(selectedMembers.filter((s) => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
               {selectedMembers.length > 4 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: C.bg, color: C.textLight, fontWeight: 600 }}>+{selectedMembers.length - 4} more</span>}
