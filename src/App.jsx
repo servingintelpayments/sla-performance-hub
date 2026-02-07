@@ -1371,22 +1371,23 @@ function LoginPage({ onLogin }) {
   const onKey = (e) => { if (e.key === "Enter") mode === "login" ? doLogin() : doReg(); };
   const iS = (f) => ({ width: "100%", padding: "14px 16px 14px 44px", borderRadius: 12, fontSize: 14, border: `2px solid ${f ? C.accent : C.border}`, background: "#fff", color: C.textDark, outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif", transition: "all 0.2s" });
 
-  const loginInputStyle = (f) => ({ width: "100%", padding: "14px 16px 14px 44px", borderRadius: 12, fontSize: 14, border: `1px solid ${f ? "rgba(232,101,58,0.4)" : "rgba(232,101,58,0.15)"}`, background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif", transition: "all 0.2s" });
+  const loginInputStyle = (f) => ({ width: "100%", padding: "14px 16px 14px 44px", borderRadius: 12, fontSize: 14, border: `2px solid ${f ? C.accent : "#E8ECF0"}`, background: "#fff", color: C.textDark, outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif", transition: "all 0.2s" });
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'DM Sans',sans-serif", background: "#050a14", position: "relative", overflow: "hidden" }}>
+    <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'DM Sans',sans-serif", background: "#080d18", position: "relative", overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
-      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}} @keyframes slideR{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:translateX(0)}} .login-input::placeholder{color:rgba(255,255,255,0.3)}`}</style>
-      {/* Full-bleed logo background */}
-      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 0 }}>
-        <img src="logo_bg.png" alt="" style={{ width: "120%", maxWidth: 1600, opacity: 0.07, filter: "brightness(1.8) grayscale(1)" }} />
+      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}} @keyframes slideR{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:translateX(0)}} @keyframes pulseGlow{0%,100%{opacity:1;transform:translate(-50%,-50%) scale(1)}50%{opacity:0.7;transform:translate(-50%,-50%) scale(1.03)}} @keyframes float{0%,100%{transform:translateY(0);opacity:0.3}50%{transform:translateY(-40px);opacity:0.8}} input::placeholder{color:${C.textLight}}`}</style>
+      {/* Centered massive globe with orange glow */}
+      <div style={{ position: "absolute", left: "45%", top: "50%", transform: "translate(-50%,-50%)", width: 1000, height: 1000, pointerEvents: "none", zIndex: 0 }}>
+        <div style={{ position: "absolute", inset: "20%", borderRadius: "50%", background: "radial-gradient(circle, rgba(232,101,58,0.14) 0%, rgba(245,166,35,0.06) 35%, transparent 65%)", animation: "pulseGlow 6s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <img src="logo_bg.png" alt="" style={{ width: "100%", opacity: 0.05, filter: "brightness(2) grayscale(1)" }} />
+        </div>
       </div>
-      {/* Gradient overlay */}
-      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(5,10,20,0.95) 0%, rgba(5,10,20,0.7) 40%, rgba(5,10,20,0.3) 70%, rgba(5,10,20,0.85) 100%)", zIndex: 1, pointerEvents: "none" }} />
-      {/* Bottom accent line */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, transparent, ${C.accent}, ${C.gold}, transparent)`, zIndex: 3 }} />
-      {/* Top accent line */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent, rgba(232,101,58,0.3), transparent)`, zIndex: 3 }} />
+      {/* Floating particle dots */}
+      {[{top:"20%",left:"15%",delay:"0s"},{top:"40%",left:"25%",delay:"1.5s"},{top:"60%",left:"10%",delay:"3s"},{top:"75%",left:"35%",delay:"4.5s"},{top:"30%",left:"50%",delay:"2s"},{top:"80%",left:"55%",delay:"5s"},{top:"15%",left:"60%",delay:"1s"},{top:"50%",left:"5%",delay:"3.5s"}].map((d, i) => (
+        <div key={i} style={{ position: "absolute", width: 2, height: 2, background: "rgba(232,101,58,0.3)", borderRadius: "50%", top: d.top, left: d.left, animation: `float 8s infinite`, animationDelay: d.delay, zIndex: 1 }} />
+      ))}
       {/* Left content */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 80px", position: "relative", zIndex: 2, animation: ready ? "slideR 0.8s ease" : "none", opacity: ready ? 1 : 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 60 }}>
@@ -1397,24 +1398,24 @@ function LoginPage({ onLogin }) {
         <p style={{ fontSize: 17, color: "rgba(255,255,255,0.56)", lineHeight: 1.7, maxWidth: 460, margin: "0 0 48px" }}>Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365.</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           {[["⬥ Dynamics 365", C.d365], ["🔵 Tier 1 Service Desk", null], ["🟠 Tier 2 Programming", null], ["🟣 Tier 3 Rel. Managers", null]].map(([l, c], i) => (
-            <div key={i} style={{ padding: "8px 16px", borderRadius: 10, background: "rgba(232,101,58,0.06)", border: "1px solid rgba(232,101,58,0.12)", fontSize: 13, fontWeight: 600, color: c || "rgba(255,255,255,0.75)" }}>{l}</div>
+            <div key={i} style={{ padding: "8px 16px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(232,101,58,0.15)", fontSize: 13, fontWeight: 600, color: c || "rgba(255,255,255,0.8)" }}>{l}</div>
           ))}
         </div>
       </div>
-      {/* Right login card - glass morphism dark */}
+      {/* Right login card - light with backdrop blur */}
       <div style={{ width: 480, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 60px", position: "relative", zIndex: 2, animation: ready ? "fadeUp 0.6s ease 0.2s both" : "none" }}>
-        <div style={{ width: "100%", background: "rgba(15,20,35,0.85)", border: "1px solid rgba(232,101,58,0.12)", borderRadius: 24, padding: "44px 36px", boxShadow: "0 24px 80px rgba(0,0,0,0.5)", backdropFilter: "blur(30px)" }}>
-          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
-          <p style={{ margin: "0 0 28px", fontSize: 14, color: "rgba(255,255,255,0.45)" }}>{mode === "login" ? "Sign in to your dashboard" : "Set up your SLA Hub access"}</p>
-          <div style={{ display: "flex", gap: 0, marginBottom: 28, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: 3 }}>
-            {["login", "register"].map((m) => (<button key={m} onClick={() => { setMode(m); setErr(""); setOk(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: mode === m ? "rgba(232,101,58,0.15)" : "transparent", color: mode === m ? "#fff" : "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: mode === m ? "0 2px 8px rgba(232,101,58,0.15)" : "none", transition: "all 0.2s", fontFamily: "'DM Sans',sans-serif" }}>{m === "login" ? "Sign In" : "Create Account"}</button>))}
+        <div style={{ width: "100%", background: "rgba(250,250,248,0.97)", borderRadius: 24, padding: "44px 36px", boxShadow: "0 24px 80px rgba(0,0,0,0.4)", backdropFilter: "blur(20px)" }}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display',serif" }}>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
+          <p style={{ margin: "0 0 28px", fontSize: 14, color: C.textMid }}>{mode === "login" ? "Sign in to your dashboard" : "Set up your SLA Hub access"}</p>
+          <div style={{ display: "flex", gap: 0, marginBottom: 28, background: C.bg, borderRadius: 10, padding: 3 }}>
+            {["login", "register"].map((m) => (<button key={m} onClick={() => { setMode(m); setErr(""); setOk(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: mode === m ? C.card : "transparent", color: mode === m ? C.textDark : C.textLight, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s", fontFamily: "'DM Sans',sans-serif" }}>{m === "login" ? "Sign In" : "Create Account"}</button>))}
           </div>
-          {mode === "register" && <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "rgba(255,255,255,0.3)" }}>👤</span><input className="login-input" placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>}
-          <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "rgba(255,255,255,0.3)" }}>📧</span><input className="login-input" placeholder="Username" value={u} onChange={(e) => setU(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>
-          <div style={{ marginBottom: mode === "register" ? 16 : 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "rgba(255,255,255,0.3)" }}>🔒</span><input className="login-input" type={showPw ? "text" : "password"} placeholder="Password" value={p} onChange={(e) => setP(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /><span onClick={() => setShowPw(!showPw)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 14, cursor: "pointer", color: "rgba(255,255,255,0.3)" }}>{showPw ? "🙈" : "👁️"}</span></div>
-          {mode === "register" && <div style={{ marginBottom: 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: "rgba(255,255,255,0.3)" }}>🔒</span><input className="login-input" type="password" placeholder="Confirm Password" value={cp} onChange={(e) => setCp(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>}
-          {err && <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(229,84,75,0.15)", color: "#ff6b6b", fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>❌ {err}</div>}
-          {ok && <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(45,157,120,0.15)", color: "#6dd5a0", fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>✅ {ok}</div>}
+          {mode === "register" && <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>👤</span><input placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>}
+          <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>📧</span><input placeholder="Username" value={u} onChange={(e) => setU(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>
+          <div style={{ marginBottom: mode === "register" ? 16 : 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span><input type={showPw ? "text" : "password"} placeholder="Password" value={p} onChange={(e) => setP(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /><span onClick={() => setShowPw(!showPw)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 14, cursor: "pointer", color: C.textLight }}>{showPw ? "🙈" : "👁️"}</span></div>
+          {mode === "register" && <div style={{ marginBottom: 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span><input type="password" placeholder="Confirm Password" value={cp} onChange={(e) => setCp(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>}
+          {err && <div style={{ padding: "10px 14px", borderRadius: 10, background: C.redLight, color: C.red, fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>❌ {err}</div>}
+          {ok && <div style={{ padding: "10px 14px", borderRadius: 10, background: C.greenLight, color: C.green, fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>✅ {ok}</div>}
           <button onClick={mode === "login" ? doLogin : doReg} disabled={loading} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, color: "#fff", fontSize: 16, fontWeight: 700, cursor: loading ? "wait" : "pointer", marginTop: 20, opacity: loading ? 0.7 : 1, boxShadow: "0 4px 20px rgba(232,101,58,0.35)", fontFamily: "'DM Sans',sans-serif" }}>{loading ? "..." : mode === "login" ? "Sign In →" : "Create Account →"}</button>
         </div>
       </div>
