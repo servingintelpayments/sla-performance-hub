@@ -1400,16 +1400,10 @@ function Dashboard({ user, onLogout }) {
       tier: 1, label: "Tier 1 — Service Desk",
       match: (name) => {
         const n = name.toLowerCase();
-        // Must contain "service desk" but NOT angle brackets, NOT "lead shift", NOT "queue" suffix
-        if (!n.includes("service desk")) return false;
-        if (name.includes("<") || name.includes(">")) return false;
-        if (n.includes("lead shift")) return false;
-        if (n.includes("queue") && n !== "service desk queue") return false;
-        // Prefer exact "Service Desk"
-        return true;
+        // Match exactly "<Service Desk>" (with angle brackets)
+        if (n === "<service desk>") return true;
+        return false;
       },
-      // If multiple match, prefer the shortest/simplest name
-      prefer: (a, b) => a.name.replace(" 🔒", "").trim().length - b.name.replace(" 🔒", "").trim().length,
     },
     {
       tier: 2, label: "Tier 2 — Programming Team",
