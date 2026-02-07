@@ -1327,7 +1327,7 @@ function LoginPage({ onLogin }) {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 80px", position: "relative", zIndex: 2, animation: ready ? "slideR 0.8s ease" : "none", opacity: ready ? 1 : 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 60 }}>
           <div style={{ width: 56, height: 56, borderRadius: 16, background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", boxShadow: `0 8px 32px rgba(232,101,58,0.35)` }}>S</div>
-          <div><div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>SLA Performance Hub</div><div style={{ fontSize: 12, color: "#ffffff80", letterSpacing: 2, textTransform: "uppercase", fontWeight: 600, marginTop: 2 }}>Service Desk Analytics</div></div>
+          <div><div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>Service and Operations Dashboard</div><div style={{ fontSize: 12, color: "#ffffff80", letterSpacing: 2, textTransform: "uppercase", fontWeight: 600, marginTop: 2 }}>Performance Analytics</div></div>
         </div>
         <h1 style={{ fontSize: 52, fontWeight: 800, color: "#fff", lineHeight: 1.1, margin: "0 0 24px", fontFamily: "'Playfair Display',serif", maxWidth: 520 }}>Real-time SLA<br /><span style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Intelligence</span></h1>
         <p style={{ fontSize: 17, color: "#ffffff90", lineHeight: 1.7, maxWidth: 460, margin: "0 0 48px" }}>Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365 and 8x8.</p>
@@ -1394,32 +1394,36 @@ function Dashboard({ user, onLogout }) {
   }, []);
 
   // Fetch queues from D365 when connected — filter to 3 tiers only
-  const TIER_QUEUE_MAP = {
-    "Service Desk": { tier: 1, label: "Tier 1 — Service Desk" },
-    "<Service Desk>": { tier: 1, label: "Tier 1 — Service Desk" },
-    "Service Desk Queue": { tier: 1, label: "Tier 1 — Service Desk" },
-    "Programming Team": { tier: 2, label: "Tier 2 — Programming Team" },
-    "Relationship Managers": { tier: 3, label: "Tier 3 — Relationship Managers" },
-  };
-  const TIER_QUEUE_KEYWORDS = ["service desk", "programming team", "relationship manager"];
+  // Exact queue names to match (order = priority — first match wins per tier)
+  const TIER_EXACT_NAMES = [
+    { names: ["Service Desk Queue", "Service Desk"], tier: 1, label: "Tier 1 — Service Desk" },
+    { names: ["Programming Team"], tier: 2, label: "Tier 2 — Programming Team" },
+    { names: ["Relationship Managers"], tier: 3, label: "Tier 3 — Relationship Managers" },
+  ];
 
   useEffect(() => {
     if (d365Account) {
       setLoadingQueues(true);
       fetchD365Queues().then(q => {
-        // Filter to only the 3 tier queues
-        const filtered = q.filter(queue => {
-          const cleanName = queue.name.replace(" 🔒", "").trim();
-          return TIER_QUEUE_KEYWORDS.some(kw => cleanName.toLowerCase().includes(kw));
-        }).map(queue => {
-          const cleanName = queue.name.replace(" 🔒", "").trim();
-          const mapping = Object.entries(TIER_QUEUE_MAP).find(([key]) => cleanName.toLowerCase().includes(key.toLowerCase()));
-          return {
-            ...queue,
-            tierLabel: mapping ? mapping[1].label : queue.name,
-            tierNum: mapping ? mapping[1].tier : 0,
-          };
-        }).sort((a, b) => a.tierNum - b.tierNum);
+        // Match exactly one queue per tier
+        const filtered = [];
+        for (const tierDef of TIER_EXACT_NAMES) {
+          let matched = null;
+          for (const exactName of tierDef.names) {
+            matched = q.find(queue => {
+              const cleanName = queue.name.replace(" 🔒", "").trim();
+              return cleanName.toLowerCase() === exactName.toLowerCase();
+            });
+            if (matched) break;
+          }
+          if (matched) {
+            filtered.push({
+              ...matched,
+              tierLabel: tierDef.label,
+              tierNum: tierDef.tier,
+            });
+          }
+        }
         setQueues(filtered);
         setLoadingQueues(false);
       }).catch(() => setLoadingQueues(false));
@@ -1592,8 +1596,8 @@ function Dashboard({ user, onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>S</div>
           <div>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>SLA Performance Hub</h1>
-            <div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 + 8x8 Analytics · Service Desk</div>
+            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h1>
+            <div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 + 8x8 Analytics · Operations</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1698,7 +1702,7 @@ function Dashboard({ user, onLogout }) {
           {!hasRun ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", textAlign: "center" }}>
               <div style={{ width: 100, height: 100, borderRadius: 24, background: `linear-gradient(135deg, ${C.accent}15, ${C.yellow}15)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>📊</div>
-              <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service Desk SLA Dashboard</h2>
+              <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h2>
               <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>
                 Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>.
                 {isLive ? <> Live data from <strong style={{ color: C.d365 }}>D365</strong> and <strong style={{ color: C.e8x8 }}>8x8</strong>.</> : <> Data pulls from <strong style={{ color: C.d365 }}>Dynamics 365</strong> and <strong style={{ color: C.e8x8 }}>8x8 Analytics</strong>.</>}
@@ -1717,7 +1721,7 @@ function Dashboard({ user, onLogout }) {
               {/* Report Header */}
               <div style={{ marginBottom: 24, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Service Desk Report`}</h2>
+                  <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Operations Report`}</h2>
                   <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     {selectedQueue && <span>🏢 {queues.find(q => q.id === selectedQueue)?.tierLabel?.replace(" 🔒", "") || "Tier"}</span>}
                     <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All tier members"}</span>
@@ -1749,16 +1753,21 @@ function Dashboard({ user, onLogout }) {
                 </>
               ) : (
                 <>
-                  {/* Global tier report (no specific members selected) */}
-                  <TierSection tier={1} data={data} members={teamMembers} />
-                  <TierSection tier={2} data={data} members={teamMembers} />
-                  <TierSection tier={3} data={data} members={teamMembers} />
+                  {/* Show only the selected tier */}
+                  {(() => {
+                    const selectedTierNum = queues.find(q => q.id === selectedQueue)?.tierNum;
+                    if (selectedTierNum) {
+                      return <TierSection tier={selectedTierNum} data={data} members={teamMembers} />;
+                    }
+                    // Fallback: show all tiers
+                    return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />);
+                  })()}
                   <OverallSummary data={data} />
                   <Definitions />
                 </>
               )}
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
-                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live D365 + 8x8 data" : "with demo data"} by Service Desk SLA System</p>
+                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live D365 + 8x8 data" : "with demo data"} by Service and Operations Dashboard</p>
               </div>
               <ChartsPanel data={data} />
             </div>
