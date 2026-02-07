@@ -7,9 +7,9 @@ import {
 import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
 
 /* ═══════════════════════════════════════════════════════════════════
-   SLA PERFORMANCE HUB v6.1
-   Sidebar Layout + MSAL.js D365 Auth + 8x8 Live API
-   Data: Dynamics 365 (Cases/SLA/CSAT) + 8x8 (Phone Metrics)
+   SERVICE AND OPERATIONS DASHBOARD v7
+   Sidebar Layout + MSAL.js D365 Auth + Live OData
+   Data: Dynamics 365 (Cases/SLA/CSAT/Phone Calls)
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ─── MSAL CONFIGURATION ─── */
@@ -115,21 +115,6 @@ async function d365Count(query) {
   return data["@odata.count"] ?? data.value?.length ?? 0;
 }
 
-/* ─── 8x8 API HELPER ─── */
-async function fetch8x8(baseUrl, apiKey, endpoint) {
-  const res = await fetch(`${baseUrl}${endpoint}`, {
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`8x8 API ${res.status}: ${text.substring(0, 200)}`);
-  }
-  return res.json();
-}
-
 /* ─── REAL TIER DEFINITIONS (from D365 casetypecode) ─── */
 const TIERS = {
   1: {
@@ -188,7 +173,7 @@ const C = {
   yellow: "#E6B422", gray: "#9e9e9e", grayLight: "#f5f5f5",
   bg: "#F4F1EC", card: "#FFFFFF", border: "#E2DDD5",
   textDark: "#1B2A4A", textMid: "#5A6578", textLight: "#8B95A5",
-  d365: "#0078D4", e8x8: "#FF6B35",
+  d365: "#0078D4",
 };
 const PIE_COLORS = [C.accent, "#2D9D78", C.blue, C.yellow, C.purple, C.accentLight, "#A3E4C8"];
 
@@ -376,7 +361,7 @@ function generateDemoData(startDate, endDate, selectedMembers) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   LIVE DATA FETCHER — D365 OData + 8x8 Analytics
+   LIVE DATA FETCHER — D365 OData
    ═══════════════════════════════════════════════════════ */
 
 /* ─── PER-MEMBER DATA FETCH ─── */
@@ -584,6 +569,17 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     errors.push(`Resolution time: ${err.message}`);
   }
 
+  // ── Phone call activity (aggregate for tier 1 — all agents) ──
+  const phoneIncoming = await safeCount("Phone Incoming",
+    `phonecalls?$filter=directioncode eq false and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const phoneOutgoing = await safeCount("Phone Outgoing",
+    `phonecalls?$filter=directioncode eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const phoneVoicemails = await safeCount("Phone Voicemails",
+    `phonecalls?$filter=directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const phoneTotal = await safeCount("Phone Total",
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const phoneAnswered = Math.max(0, phoneIncoming - phoneVoicemails);
+
   const allCases = t1Cases + t2Cases + t3Cases;
   const allResolved = t2Resolved + t3Resolved + t1SLAMet;
 
@@ -610,108 +606,27 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
       slaCompliance: emailCases ? Math.round(emailResolved / emailCases * 100) : "N/A",
     },
     csat: { responses: csatResponses, avgScore: csatAvg },
-    overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: 0, abandonedCalls: 0 },
+    phone: { totalCalls: phoneTotal, incoming: phoneIncoming, outgoing: phoneOutgoing, answered: phoneAnswered, voicemails: phoneVoicemails },
+    overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: phoneAnswered, abandonedCalls: phoneVoicemails },
     timeline: [],
     source: "d365",
     errors,
   };
 }
 
-async function fetchLive8x8Data(config, startDate, endDate, onProgress) {
-  const { baseUrl, apiKey, tenantId } = config;
-  const errors = [];
-  const progress = (msg) => onProgress?.(`8x8: ${msg}`);
-  let phone = { totalCalls: 0, answered: 0, abandoned: 0, answerRate: 0, avgAHT: 0 };
-
-  if (!baseUrl || !apiKey) {
-    return { phone, errors: ["8x8 not configured"] };
-  }
-
-  try {
-    progress("Fetching call statistics...");
-    const res = await fetch(`${baseUrl}/analytics/v2/call-records?startTime=${startDate}T00:00:00Z&endTime=${endDate}T23:59:59Z`, {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "X-8x8-Tenant": tenantId,
-      },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const records = data.records || data.data || data.value || [];
-      const total = records.length || data.totalCount || 0;
-      const answeredRecords = records.filter?.(r => r.answered || r.status === "answered") || [];
-      const answeredCount = answeredRecords.length || Math.round(total * 0.93);
-      const ahtValues = records.map?.(r => parseFloat(r.handleTime || r.duration || 0) / 60).filter(v => v > 0) || [];
-      const avgAHT = ahtValues.length > 0 ? +(ahtValues.reduce((a, b) => a + b, 0) / ahtValues.length).toFixed(1) : 0;
-
-      phone = {
-        totalCalls: total,
-        answered: answeredCount,
-        abandoned: total - answeredCount,
-        answerRate: total ? Math.round(answeredCount / total * 100) : 0,
-        avgAHT,
-      };
-    } else {
-      const text = await res.text();
-      errors.push(`Call records: HTTP ${res.status} — ${text.substring(0, 100)}`);
-    }
-  } catch (err) {
-    errors.push(`Call stats: ${err.message}`);
-  }
-
-  // Try queue statistics for more detailed metrics
-  try {
-    progress("Fetching queue statistics...");
-    const res = await fetch(`${baseUrl}/analytics/v2/queue-statistics?startTime=${startDate}T00:00:00Z&endTime=${endDate}T23:59:59Z`, {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "X-8x8-Tenant": tenantId,
-      },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      // Merge queue data if available
-      if (data.totalCalls) phone.totalCalls = data.totalCalls;
-      if (data.answeredCalls) phone.answered = data.answeredCalls;
-      if (data.abandonedCalls) phone.abandoned = data.abandonedCalls;
-      if (data.avgHandleTime) phone.avgAHT = +(data.avgHandleTime / 60).toFixed(1);
-      if (phone.totalCalls) phone.answerRate = Math.round(phone.answered / phone.totalCalls * 100);
-    }
-  } catch (err) {
-    // Queue stats are supplementary, don't add to errors
-  }
-
-  return { phone, errors };
-}
-
 async function fetchLiveData(config, startDate, endDate, onProgress) {
   const progress = (msg) => onProgress?.(msg);
-  const allErrors = [];
 
-  // Fetch D365 data
+  // Fetch D365 data (cases, SLA, CSAT, phone calls — all from D365)
   progress("Connecting to Dynamics 365...");
   const d365Data = await fetchLiveD365Data(startDate, endDate, progress);
-  allErrors.push(...(d365Data.errors || []));
 
-  // Fetch 8x8 data
-  progress("Connecting to 8x8 Analytics...");
-  const e8x8Data = await fetchLive8x8Data(config.e8x8 || {}, startDate, endDate, progress);
-  allErrors.push(...(e8x8Data.errors || []));
-
-  // Merge results
   progress("Compiling report...");
   return {
     ...d365Data,
-    phone: e8x8Data.phone,
-    overall: {
-      ...d365Data.overall,
-      answeredCalls: e8x8Data.phone.answered,
-      abandonedCalls: e8x8Data.phone.abandoned,
-    },
+    phone: d365Data.phone || { totalCalls: 0, answered: 0, abandoned: 0, answerRate: 0, avgAHT: 0 },
     source: "live",
-    errors: allErrors,
+    errors: d365Data.errors || [],
   };
 }
 
@@ -891,6 +806,36 @@ function TierSection({ tier, data, members }) {
           <MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />
         ))}
       </div>
+
+      {/* Phone Activity — Tier 1 only */}
+      {tier === 1 && data.phone && (
+        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>📞</span> Phone Activity — Team Total
+          </div>
+          {[
+            { icon: "📥", label: "Total Incoming Calls", value: data.phone.incoming ?? 0, accent: C.blue },
+            { icon: "✅", label: "Answered Live", value: data.phone.answered ?? 0, accent: "#2D9D78" },
+            { icon: "📤", label: "Outgoing Calls", value: data.phone.outgoing ?? 0, accent: C.textDark },
+            { icon: "📱", label: "Voicemails (VM)", value: data.phone.voicemails ?? 0, accent: C.orange },
+          ].map((ps, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16 }}>{ps.icon}</span>
+                <span style={{ fontSize: 13, color: C.textMid }}>{ps.label}</span>
+              </div>
+              <span style={{ fontSize: 18, fontWeight: 700, color: ps.accent, fontFamily: "'Space Mono', monospace" }}>{ps.value}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 16 }}>📊</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>Total Phone Activities</span>
+            </div>
+            <span style={{ fontSize: 22, fontWeight: 800, color: t.color, fontFamily: "'Space Mono', monospace" }}>{data.phone.totalCalls ?? 0}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -937,7 +882,7 @@ function Definitions() {
       </table>
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 12, fontSize: 11, color: "#888", lineHeight: 1.8 }}>
         <div>✅ Met &nbsp;|&nbsp; ⚠️ Approaching &nbsp;|&nbsp; 🔴 Miss &nbsp;|&nbsp; ➖ N/A</div>
-        <div>📊 <strong>Data Sources:</strong> Microsoft Dynamics 365 Customer Service &nbsp;|&nbsp; 8x8 Contact Center</div>
+        <div>📊 <strong>Data Sources:</strong> Microsoft Dynamics 365 Customer Service</div>
       </div>
     </div>
   );
@@ -947,19 +892,25 @@ function Definitions() {
 function MemberSection({ memberData, index }) {
   const d = memberData;
   const m = d.member;
+  const isTier1 = m.tier === 1;
   const colors = [C.blue, C.accent, C.purple, "#2D9D78", C.gold, "#E91E63", "#00BCD4", "#795548"];
   const color = colors[index % colors.length];
   const colorDark = color + "DD";
   const slaMet = d.slaMet || 0;
   const slaMissed = Math.max(0, d.totalCases - slaMet);
 
-  const metrics = [
+  // Tier 1: full metrics | Tier 2/3: SLA + Escalation + Resolution Time only
+  const metrics = isTier1 ? [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
     { label: "Avg Resolution Time", value: parseFloat(d.avgResTime) || "N/A", target: 6, unit: " hrs" },
     { label: "Email SLA", value: d.emailSla, target: 90, unit: "%" },
     { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
+  ] : [
+    { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
+    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
+    { label: "Avg Resolution Time", value: parseFloat(d.avgResTime) || "N/A", target: 6, unit: " hrs" },
   ];
 
   const PhoneStat = ({ icon, label, value, accent }) => (
@@ -1002,23 +953,25 @@ function MemberSection({ memberData, index }) {
         ))}
       </div>
 
-      {/* Phone Activity Section */}
-      <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 18 }}>📞</span> Phone Activity
-        </div>
-        <PhoneStat icon="📥" label="Total Incoming Calls" value={d.incomingCalls ?? 0} accent={C.blue} />
-        <PhoneStat icon="✅" label="Answered Live" value={d.answeredLive ?? 0} accent="#2D9D78" />
-        <PhoneStat icon="📤" label="Outgoing Calls" value={d.outgoingCalls ?? 0} accent={C.textDark} />
-        <PhoneStat icon="📱" label="Voicemails (VM)" value={d.voicemails ?? 0} accent={C.orange} />
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>📊</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>Total Phone Activities</span>
+      {/* Phone Activity Section — Tier 1 only */}
+      {isTier1 && (
+        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>📞</span> Phone Activity
           </div>
-          <span style={{ fontSize: 22, fontWeight: 800, color: color, fontFamily: "'Space Mono', monospace" }}>{d.totalPhoneCalls ?? 0}</span>
+          <PhoneStat icon="📥" label="Total Incoming Calls" value={d.incomingCalls ?? 0} accent={C.blue} />
+          <PhoneStat icon="✅" label="Answered Live" value={d.answeredLive ?? 0} accent="#2D9D78" />
+          <PhoneStat icon="📤" label="Outgoing Calls" value={d.outgoingCalls ?? 0} accent={C.textDark} />
+          <PhoneStat icon="📱" label="Voicemails (VM)" value={d.voicemails ?? 0} accent={C.orange} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 16 }}>📊</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>Total Phone Activities</span>
+            </div>
+            <span style={{ fontSize: 22, fontWeight: 800, color: color, fontFamily: "'Space Mono', monospace" }}>{d.totalPhoneCalls ?? 0}</span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1170,7 +1123,7 @@ function MultiMemberSelect({ selected, onChange, members }) {
 /* ═══════════════════════════════════════════════════════
    CONNECTION BAR
    ═══════════════════════════════════════════════════════ */
-function ConnectionBar({ d365Connected, e8x8Connected, isLive, onOpenSettings }) {
+function ConnectionBar({ d365Connected, isLive, onOpenSettings }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 28px", background: C.card, borderBottom: `1px solid ${C.border}`, fontSize: 11 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
@@ -1179,11 +1132,6 @@ function ConnectionBar({ d365Connected, e8x8Connected, isLive, onOpenSettings })
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Connected ? C.green : C.accent }} />
           <span style={{ fontWeight: 600, color: d365Connected ? C.green : C.accent }}>D365</span>
           <span style={{ color: C.textLight }}>{d365Connected ? "Connected" : "Not connected"}</span>
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: e8x8Connected ? C.green : C.accent }} />
-          <span style={{ fontWeight: 600, color: e8x8Connected ? C.green : C.accent }}>8x8</span>
-          <span style={{ color: C.textLight }}>{e8x8Connected ? "Configured" : "Not configured"}</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: isLive ? C.green : C.blue }} />
@@ -1201,13 +1149,10 @@ function ConnectionBar({ d365Connected, e8x8Connected, isLive, onOpenSettings })
 function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login, onD365Logout }) {
   const [local, setLocal] = useState(config);
   const [d365Status, setD365Status] = useState(null);
-  const [e8x8Status, setE8x8Status] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
   useEffect(() => { setLocal(config); }, [config]);
   if (!show) return null;
-  const upd = (sec, key, val) => setLocal((p) => ({ ...p, [sec]: { ...p[sec], [key]: val } }));
   const iS = { width: "100%", padding: "10px 12px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 12, fontFamily: "'DM Sans',sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" };
-  const lS = { fontSize: 11, fontWeight: 600, color: C.textDark, marginBottom: 4, display: "block" };
 
   const handleD365SignIn = async () => {
     setSigningIn(true);
@@ -1221,23 +1166,11 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
     setSigningIn(false);
   };
 
-  const test8x8 = async () => {
-    try {
-      setE8x8Status({ testing: true });
-      const res = await fetch(`${local.e8x8.baseUrl}/analytics/v2/status`, {
-        headers: { "Authorization": `Bearer ${local.e8x8.apiKey}`, "X-8x8-Tenant": local.e8x8.tenantId },
-      });
-      setE8x8Status(res.ok ? { success: true } : { success: false, error: `HTTP ${res.status}` });
-    } catch (err) {
-      setE8x8Status({ success: false, error: err.message });
-    }
-  };
-
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: C.card, borderRadius: 20, width: 660, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
         <div style={{ padding: "24px 28px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div><h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⚙️ Data Source Configuration</h2><p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Connect to Dynamics 365 and 8x8 Analytics</p></div>
+          <div><h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⚙️ Data Source Configuration</h2><p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Connect to Dynamics 365</p></div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: C.textLight }}>✕</button>
         </div>
         <div style={{ padding: "24px 28px" }}>
@@ -1267,32 +1200,13 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
             </div>
           )}
 
-          {/* ── 8x8 Section ── */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, marginTop: 24 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: C.e8x8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>8</div>
-            <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>8x8 Analytics</div><div style={{ fontSize: 10, color: C.textMid }}>Contact Center Analytics — Calls, AHT, Queue Stats</div></div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <label><span style={lS}>API Base URL</span><input value={local.e8x8?.baseUrl || ""} onChange={(e) => upd("e8x8", "baseUrl", e.target.value)} placeholder="https://api.8x8.com" style={iS} /></label>
-            <label><span style={lS}>Tenant ID</span><input value={local.e8x8?.tenantId || ""} onChange={(e) => upd("e8x8", "tenantId", e.target.value)} style={iS} /></label>
-          </div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-            <label style={{ flex: 1 }}><span style={lS}>API Key</span><input type="password" value={local.e8x8?.apiKey || ""} onChange={(e) => upd("e8x8", "apiKey", e.target.value)} style={iS} /></label>
-            <div style={{ alignSelf: "flex-end" }}><button onClick={test8x8} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${C.e8x8}`, background: "transparent", color: C.e8x8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Test</button></div>
-          </div>
-          {e8x8Status && !e8x8Status.testing && (
-            <div style={{ marginBottom: 16, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: e8x8Status.success ? C.greenLight : C.redLight, color: e8x8Status.success ? C.green : C.red }}>
-              {e8x8Status.success ? "✅ 8x8 Connected!" : `❌ ${e8x8Status.error}`}
-            </div>
-          )}
-
           {/* ── Mode Toggle ── */}
           <div style={{ background: C.bg, borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, marginTop: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
               <div onClick={() => setLocal((p) => ({ ...p, live: !p.live }))} style={{ width: 44, height: 24, borderRadius: 12, padding: 2, background: local.live ? C.green : C.border, transition: "background 0.2s", cursor: "pointer" }}>
                 <div style={{ width: 20, height: 20, borderRadius: 10, background: "#fff", transform: local.live ? "translateX(20px)" : "translateX(0)", transition: "transform 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }} />
               </div>
-              <div><div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{local.live ? "🟢 Live Data Mode" : "🔵 Demo Data Mode"}</div><div style={{ fontSize: 11, color: C.textMid }}>{local.live ? "Pulling from D365 + 8x8 APIs" : "Simulated demo data"}</div></div>
+              <div><div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{local.live ? "🟢 Live Data Mode" : "🔵 Demo Data Mode"}</div><div style={{ fontSize: 11, color: C.textMid }}>{local.live ? "Pulling from Dynamics 365" : "Simulated demo data"}</div></div>
             </label>
           </div>
         </div>
@@ -1330,9 +1244,9 @@ function LoginPage({ onLogin }) {
           <div><div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>Service and Operations Dashboard</div><div style={{ fontSize: 12, color: "#ffffff80", letterSpacing: 2, textTransform: "uppercase", fontWeight: 600, marginTop: 2 }}>Performance Analytics</div></div>
         </div>
         <h1 style={{ fontSize: 52, fontWeight: 800, color: "#fff", lineHeight: 1.1, margin: "0 0 24px", fontFamily: "'Playfair Display',serif", maxWidth: 520 }}>Real-time SLA<br /><span style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Intelligence</span></h1>
-        <p style={{ fontSize: 17, color: "#ffffff90", lineHeight: 1.7, maxWidth: 460, margin: "0 0 48px" }}>Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365 and 8x8.</p>
+        <p style={{ fontSize: 17, color: "#ffffff90", lineHeight: 1.7, maxWidth: 460, margin: "0 0 48px" }}>Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365.</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {[["⬥ Dynamics 365", C.d365], ["⬥ 8x8 Analytics", C.e8x8], ["🔵 Tier 1 Service Desk", null], ["🟠 Tier 2 Programming", null], ["🟣 Tier 3 Rel. Managers", null]].map(([l, c], i) => (
+          {[["⬥ Dynamics 365", C.d365], ["🔵 Tier 1 Service Desk", null], ["🟠 Tier 2 Programming", null], ["🟣 Tier 3 Rel. Managers", null]].map(([l, c], i) => (
             <div key={i} style={{ padding: "8px 16px", borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", fontSize: 13, fontWeight: 600, color: c || "#ffffffCC" }}>{l}</div>
           ))}
         </div>
@@ -1375,7 +1289,7 @@ function Dashboard({ user, onLogout }) {
   const [isRunning, setIsRunning] = useState(false);
   const [runProgress, setRunProgress] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [apiConfig, setApiConfig] = useState({ e8x8: { baseUrl: "", tenantId: "", apiKey: "" }, live: false });
+  const [apiConfig, setApiConfig] = useState({ live: false });
   const [d365Account, setD365Account] = useState(null);
   const [liveErrors, setLiveErrors] = useState([]);
   const reportRef = useRef(null);
@@ -1609,7 +1523,7 @@ function Dashboard({ user, onLogout }) {
           <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>S</div>
           <div>
             <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h1>
-            <div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 + 8x8 Analytics · Operations</div>
+            <div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 · Operations</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1621,7 +1535,7 @@ function Dashboard({ user, onLogout }) {
         </div>
       </div>
 
-      <ConnectionBar d365Connected={!!d365Account} e8x8Connected={!!(apiConfig.e8x8?.baseUrl && apiConfig.e8x8?.apiKey)} isLive={isLive} onOpenSettings={() => setShowSettings(true)} />
+      <ConnectionBar d365Connected={!!d365Account} isLive={isLive} onOpenSettings={() => setShowSettings(true)} />
 
       <div style={{ display: "flex", maxWidth: 1500, margin: "0 auto" }}>
         {/* ═══════ SIDEBAR ═══════ */}
@@ -1717,7 +1631,7 @@ function Dashboard({ user, onLogout }) {
               <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h2>
               <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>
                 Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>.
-                {isLive ? <> Live data from <strong style={{ color: C.d365 }}>D365</strong> and <strong style={{ color: C.e8x8 }}>8x8</strong>.</> : <> Data pulls from <strong style={{ color: C.d365 }}>Dynamics 365</strong> and <strong style={{ color: C.e8x8 }}>8x8 Analytics</strong>.</>}
+                {isLive ? <> Live data from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</> : <> Data pulls from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</>}
               </p>
               <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
                 {[{ icon: "👥", label: `${selectedMembers.length} members`, ok: selectedMembers.length > 0 }, { icon: "📊", label: reportType === "daily" ? "Daily Report" : reportType === "weekly" ? "Weekly Report" : "Custom Range", ok: true }, { icon: "📅", label: `${startDate} → ${endDate}`, ok: startDate && endDate }].map((s, i) => <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: s.ok ? C.greenLight + "22" : C.accentLight + "22", border: `1px solid ${s.ok ? C.greenLight + "44" : C.accentLight + "44"}`, fontSize: 12, fontWeight: 600, color: s.ok ? C.green : C.accent, display: "flex", alignItems: "center", gap: 6 }}><span>{s.icon}</span> {s.label} {s.ok ? "✓" : "✗"}</div>)}
@@ -1779,7 +1693,7 @@ function Dashboard({ user, onLogout }) {
                 </>
               )}
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
-                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live D365 + 8x8 data" : "with demo data"} by Service and Operations Dashboard</p>
+                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live Dynamics 365 data" : "with demo data"} by Service and Operations Dashboard</p>
               </div>
               <ChartsPanel data={data} />
             </div>
