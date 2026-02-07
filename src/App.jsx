@@ -625,15 +625,15 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   }
 
   // ── Phone call activity (matches flow exactly) ──
-  // Get Phone Calls - ALL calls (no directioncode filter)
+  // Get Phone Calls - ALL calls, selects actualdurationminutes,ownerid (matches flow)
   const phoneTotal = await safeFetchCount("Phone Total",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes`);
   // Get Answered Calls - actualdurationminutes gt 0
   const phoneAnswered = await safeFetchCount("Phone Answered",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=activityid&$count=true`);
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=actualdurationminutes`);
   // Get Abandoned Calls - actualdurationminutes eq 0
   const phoneAbandoned = await safeFetchCount("Phone Abandoned",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=activityid&$count=true`);
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=actualdurationminutes`);
   // Answer Rate
   const phoneAnswerRate = phoneTotal > 0 ? Math.round(phoneAnswered / phoneTotal * 100) : 0;
 
