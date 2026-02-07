@@ -379,6 +379,83 @@ function generateDemoData(startDate, endDate, selectedMembers) {
    LIVE DATA FETCHER — D365 OData + 8x8 Analytics
    ═══════════════════════════════════════════════════════ */
 
+/* ─── PER-MEMBER DATA FETCH ─── */
+async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
+  const s = startDate, e = endDate;
+  const oid = member.id;
+  const errors = [];
+  const progress = (msg) => onProgress?.(`${member.name}: ${msg}`);
+
+  async function safeCount(label, query) {
+    try { progress(label); return await d365Count(query); }
+    catch (err) { errors.push(`${member.name} — ${label}: ${err.message}`); return 0; }
+  }
+
+  // Cases owned by this member
+  const totalCases = await safeCount("Total Cases",
+    `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const resolvedCases = await safeCount("Resolved",
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const slaMet = await safeCount("SLA Met",
+    `incidents?$filter=_ownerid_value eq ${oid} and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const fcrCases = await safeCount("FCR",
+    `incidents?$filter=_ownerid_value eq ${oid} and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const escalatedCases = await safeCount("Escalated",
+    `incidents?$filter=_ownerid_value eq ${oid} and isescalated eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const activeCases = await safeCount("Active",
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 0 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+
+  // Email cases
+  const emailCases = await safeCount("Email Cases",
+    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const emailResolved = await safeCount("Email Resolved",
+    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+
+  // CSAT
+  let csatResponses = 0, csatAvg = "N/A";
+  try {
+    progress("CSAT");
+    const csatData = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=cr7fe_new_csatscore`
+    );
+    csatResponses = csatData.value?.length || 0;
+    if (csatResponses > 0) {
+      const scores = csatData.value.map(r => parseFloat(r.cr7fe_new_csatscore)).filter(n => !isNaN(n));
+      if (scores.length > 0) csatAvg = +(scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
+    }
+  } catch (err) { errors.push(`${member.name} — CSAT: ${err.message}`); }
+
+  // Avg resolution time
+  let avgResTime = "N/A";
+  try {
+    progress("Resolution time");
+    const resolved = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=createdon,modifiedon&$top=50&$orderby=modifiedon desc`
+    );
+    if (resolved.value?.length > 0) {
+      const times = resolved.value.map(r => (new Date(r.modifiedon) - new Date(r.createdon)) / (1000 * 60 * 60)).filter(h => h > 0 && h < 720);
+      if (times.length > 0) avgResTime = +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1);
+    }
+  } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
+
+  const slaCompliance = totalCases > 0 ? Math.round(slaMet / totalCases * 100) : "N/A";
+  const fcrRate = totalCases > 0 ? Math.round(fcrCases / totalCases * 100) : "N/A";
+  const escalationRate = totalCases > 0 ? Math.round(escalatedCases / totalCases * 100) : "N/A";
+  const emailSla = emailCases > 0 ? Math.round(emailResolved / emailCases * 100) : "N/A";
+
+  return {
+    member,
+    totalCases, resolvedCases, activeCases, slaMet, slaCompliance,
+    fcrCases, fcrRate, escalatedCases, escalationRate,
+    emailCases, emailResolved, emailSla,
+    csatResponses, csatAvg,
+    avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
+    errors,
+  };
+}
+
+/* ─── GLOBAL (QUEUE-LEVEL) DATA FETCH ─── */
+
 async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const s = startDate;
   const e = endDate;
@@ -832,6 +909,154 @@ function Definitions() {
   );
 }
 
+/* ─── MEMBER SECTION — Individual agent report card ─── */
+function MemberSection({ memberData, index }) {
+  const d = memberData;
+  const m = d.member;
+  const colors = [C.blue, C.accent, C.purple, "#2D9D78", C.gold, "#E91E63", "#00BCD4", "#795548"];
+  const color = colors[index % colors.length];
+  const colorLight = color + "15";
+
+  return (
+    <div style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.border}`, marginBottom: 16, overflow: "hidden", animation: "slideIn 0.4s ease" }}>
+      {/* Member Header */}
+      <div style={{ background: `linear-gradient(135deg, ${color}, ${color}CC)`, padding: "18px 24px", display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", border: "2px solid rgba(255,255,255,0.3)" }}>{m.avatar}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff" }}>{m.name}</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", display: "flex", gap: 10, marginTop: 2 }}>
+            <span>{m.role}</span>
+            {m.email && <span>• {m.email}</span>}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: "#fff", fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{d.totalCases}</div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>Total Cases</div>
+        </div>
+      </div>
+
+      {/* Metrics Grid */}
+      <div style={{ padding: "20px 24px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+          {/* Cases Summary */}
+          <div style={{ background: C.greenLight, borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: C.green, fontFamily: "'Space Mono', monospace" }}>{d.resolvedCases}</div>
+            <div style={{ fontSize: 11, color: C.textMid, marginTop: 2 }}>Resolved</div>
+          </div>
+          <div style={{ background: C.blueLight, borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: C.blue, fontFamily: "'Space Mono', monospace" }}>{d.activeCases}</div>
+            <div style={{ fontSize: 11, color: C.textMid, marginTop: 2 }}>Active</div>
+          </div>
+          <div style={{ background: d.escalatedCases > 0 ? C.redLight : C.greenLight, borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: d.escalatedCases > 0 ? C.red : C.green, fontFamily: "'Space Mono', monospace" }}>{d.escalatedCases}</div>
+            <div style={{ fontSize: 11, color: C.textMid, marginTop: 2 }}>Escalated</div>
+          </div>
+        </div>
+
+        {/* SLA Metrics Table */}
+        <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <tbody>
+            <MetricRow label="SLA Compliance" value={d.slaCompliance} unit="%" metricKey="sla_compliance" targetLabel={TARGETS.sla_compliance.label} />
+            <MetricRow label="FCR Rate" value={d.fcrRate} unit="%" metricKey="fcr_rate" targetLabel={TARGETS.fcr_rate.label} />
+            <MetricRow label="Escalation Rate" value={d.escalationRate} unit="%" metricKey="escalation_rate" targetLabel={TARGETS.escalation_rate.label} />
+            <tr>
+              <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Avg Resolution Time</td>
+              <td style={{ textAlign: "right", padding: "8px 0" }}>
+                <span style={{ background: C.blue, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.avgResTime}</span>
+                <span style={{ marginLeft: 4 }}>⏱️</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Email & CSAT row */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
+          <div style={{ background: C.blueLight, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#1565c0", marginBottom: 8 }}>📧 EMAIL</div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+              <span style={{ color: C.textMid }}>Cases</span>
+              <span style={{ fontWeight: 700, color: C.textDark }}>{d.emailCases}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+              <span style={{ color: C.textMid }}>Resolved</span>
+              <span style={{ fontWeight: 700, color: C.green }}>{d.emailResolved}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+              <span style={{ color: C.textMid }}>SLA</span>
+              <StatusBadge status={checkTarget("email_sla", d.emailSla)} value={d.emailSla} unit="%" />
+            </div>
+          </div>
+          <div style={{ background: C.goldLight, borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#f57f17", marginBottom: 8 }}>⭐ CSAT</div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+              <span style={{ color: C.textMid }}>Responses</span>
+              <span style={{ fontWeight: 700, color: C.textDark }}>{d.csatResponses}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+              <span style={{ color: C.textMid }}>Avg Score</span>
+              <StatusBadge status={checkTarget("csat_score", d.csatAvg)} value={d.csatAvg} unit="/5" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── TEAM SUMMARY — aggregated from member data ─── */
+function TeamSummary({ memberDataList }) {
+  const totals = memberDataList.reduce((acc, d) => ({
+    totalCases: acc.totalCases + d.totalCases,
+    resolved: acc.resolved + d.resolvedCases,
+    active: acc.active + d.activeCases,
+    escalated: acc.escalated + d.escalatedCases,
+    slaMet: acc.slaMet + d.slaMet,
+    fcrCases: acc.fcrCases + d.fcrCases,
+    emailCases: acc.emailCases + d.emailCases,
+    emailResolved: acc.emailResolved + d.emailResolved,
+    csatResponses: acc.csatResponses + d.csatResponses,
+    csatTotal: acc.csatTotal + (d.csatAvg !== "N/A" ? d.csatAvg * d.csatResponses : 0),
+  }), { totalCases: 0, resolved: 0, active: 0, escalated: 0, slaMet: 0, fcrCases: 0, emailCases: 0, emailResolved: 0, csatResponses: 0, csatTotal: 0 });
+
+  const items = [
+    { label: "Total Cases", value: totals.totalCases, color: "#4FC3F7" },
+    { label: "Resolved", value: totals.resolved, color: "#81C784" },
+    { label: "Active", value: totals.active, color: "#64B5F6" },
+    { label: "Escalated", value: totals.escalated, color: totals.escalated > 0 ? "#f44336" : "#81C784" },
+    { label: "SLA Met", value: totals.slaMet, color: "#81C784" },
+  ];
+
+  return (
+    <div style={{ background: C.primary, padding: "24px 28px", borderRadius: 14, marginBottom: 16 }}>
+      <h3 style={{ margin: "0 0 20px", color: "#fff", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📈 TEAM SUMMARY — {memberDataList.length} Member{memberDataList.length > 1 ? "s" : ""}</h3>
+      <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 12 }}>
+        {items.map((it) => (
+          <div key={it.label} style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div>
+            <div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div>
+          </div>
+        ))}
+      </div>
+      {totals.totalCases > 0 && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          <div style={{ textAlign: "center" }}>
+            <StatusBadge status={checkTarget("sla_compliance", totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0} unit="%" />
+            <div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <StatusBadge status={checkTarget("fcr_rate", totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0} unit="%" />
+            <div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team FCR</div>
+          </div>
+          {totals.csatResponses > 0 && <div style={{ textAlign: "center" }}>
+            <StatusBadge status={checkTarget("csat_score", +(totals.csatTotal / totals.csatResponses).toFixed(1))} value={+(totals.csatTotal / totals.csatResponses).toFixed(1)} unit="/5" />
+            <div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team CSAT</div>
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    CHARTS PANEL
    ═══════════════════════════════════════════════════════ */
@@ -1202,23 +1427,77 @@ function Dashboard({ user, onLogout }) {
     setD365Account(null);
   };
 
+  const [memberData, setMemberData] = useState([]);
+
   const handleRun = async () => {
     setIsRunning(true);
     setRunProgress("");
     setLiveErrors([]);
+    setMemberData([]);
 
     try {
       if (isLive) {
-        // Live mode — fetch from D365 + 8x8
-        const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress);
-        setData(d);
-        if (d.errors?.length > 0) setLiveErrors(d.errors);
+        if (selectedMembers.length > 0) {
+          // Per-member mode — fetch each member's data
+          const results = [];
+          const allErrors = [];
+          for (const memberId of selectedMembers) {
+            const member = teamMembers.find(m => m.id === memberId);
+            if (!member) continue;
+            setRunProgress(`Fetching data for ${member.name}...`);
+            const memberResult = await fetchMemberD365Data(member, startDate, endDate, setRunProgress);
+            results.push(memberResult);
+            allErrors.push(...(memberResult.errors || []));
+          }
+          setMemberData(results);
+          // Also build a combined data object for overall summary
+          const combined = buildCombinedData(results);
+          setData({ ...combined, source: "live" });
+          if (allErrors.length > 0) setLiveErrors(allErrors);
+        } else {
+          // Queue-level mode (no specific members selected) — use global fetch
+          const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress);
+          setData(d);
+          if (d.errors?.length > 0) setLiveErrors(d.errors);
+        }
       } else {
         // Demo mode
         setRunProgress("Generating demo data...");
         await new Promise((r) => setTimeout(r, 800));
-        const d = generateDemoData(startDate, endDate, selectedMembers);
-        setData(d);
+        if (selectedMembers.length > 0) {
+          // Generate demo per-member data
+          const results = selectedMembers.map((memberId, idx) => {
+            const member = teamMembers.find(m => m.id === memberId);
+            if (!member) return null;
+            const seed = seedFrom(startDate + endDate + memberId);
+            const r = rng(seed);
+            const total = Math.round(5 + r(1) * 20);
+            const resolved = Math.round(total * (0.5 + r(2) * 0.45));
+            const slaMet = Math.round(total * (0.6 + r(3) * 0.35));
+            const fcr = Math.round(total * (0.5 + r(4) * 0.45));
+            const esc = Math.round(total * (0.01 + r(5) * 0.12));
+            const active = total - resolved;
+            const emailC = Math.round(2 + r(6) * 8);
+            const emailR = Math.round(emailC * (0.5 + r(7) * 0.45));
+            const csatR = Math.round(r(8) * 4);
+            const csatA = csatR > 0 ? +(3 + r(9) * 1.8).toFixed(1) : "N/A";
+            const resTime = +(1 + r(10) * 7).toFixed(1);
+            return {
+              member, totalCases: total, resolvedCases: resolved, activeCases: active,
+              slaMet, slaCompliance: total ? Math.round(slaMet / total * 100) : "N/A",
+              fcrCases: fcr, fcrRate: total ? Math.round(fcr / total * 100) : "N/A",
+              escalatedCases: esc, escalationRate: total ? Math.round(esc / total * 100) : "N/A",
+              emailCases: emailC, emailResolved: emailR, emailSla: emailC ? Math.round(emailR / emailC * 100) : "N/A",
+              csatResponses: csatR, csatAvg: csatA,
+              avgResTime: `${resTime} hrs`, errors: [],
+            };
+          }).filter(Boolean);
+          setMemberData(results);
+          setData({ ...buildCombinedData(results), source: "demo" });
+        } else {
+          const d = generateDemoData(startDate, endDate, selectedMembers);
+          setData(d);
+        }
       }
     } catch (err) {
       setLiveErrors([err.message]);
@@ -1228,6 +1507,23 @@ function Dashboard({ user, onLogout }) {
     setIsRunning(false);
     setRunProgress("");
   };
+
+  function buildCombinedData(results) {
+    const totals = results.reduce((acc, d) => ({
+      totalCases: acc.totalCases + d.totalCases,
+      resolved: acc.resolved + d.resolvedCases,
+      slaMet: acc.slaMet + d.slaMet,
+      emailCases: acc.emailCases + d.emailCases,
+      emailResolved: acc.emailResolved + d.emailResolved,
+      csatResponses: acc.csatResponses + d.csatResponses,
+    }), { totalCases: 0, resolved: 0, slaMet: 0, emailCases: 0, emailResolved: 0, csatResponses: 0 });
+    return {
+      overall: { created: totals.totalCases, resolved: totals.resolved, csatResponses: totals.csatResponses, answeredCalls: 0, abandonedCalls: 0 },
+      email: { total: totals.emailCases, responded: 0, resolved: totals.emailResolved, slaCompliance: totals.emailCases ? Math.round(totals.emailResolved / totals.emailCases * 100) : "N/A" },
+      phone: { totalCalls: 0, answered: 0, abandoned: 0, answerRate: 0, avgAHT: 0 },
+      timeline: [],
+    };
+  }
 
   const handleExportPDF = () => { if (reportRef.current) window.print(); };
 
@@ -1372,9 +1668,10 @@ function Dashboard({ user, onLogout }) {
               {/* Report Header */}
               <div style={{ marginBottom: 24, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Service Desk Report</h2>
+                  <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Service Desk Report`}</h2>
                   <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <span>👥 {selectedMembers.length} member{selectedMembers.length > 1 ? "s" : ""}</span>
+                    {selectedQueue && <span>📋 {queues.find(q => q.id === selectedQueue)?.name?.replace(" 🔒", "") || "Queue"}</span>}
+                    <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All queue members"}</span>
                     <span>📅 {dateLabel}</span>
                     <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: data.source === "live" ? C.greenLight + "33" : data.source === "d365" ? C.greenLight + "33" : "#0078D415", color: data.source === "live" || data.source === "d365" ? C.green : "#0078D4", fontWeight: 600 }}>{data.source === "live" || data.source === "d365" ? "🟢 Live Data" : "🔵 Demo"}</span>
                   </div>
@@ -1391,20 +1688,35 @@ function Dashboard({ user, onLogout }) {
               )}
 
               {/* Report Sections */}
-              <TierSection tier={1} data={data} />
-              <div style={{ height: 3, background: C.bg }} />
-              <TierSection tier={2} data={data} />
-              <div style={{ height: 3, background: C.bg }} />
-              <TierSection tier={3} data={data} />
-              <div style={{ height: 3, background: C.bg }} />
-              <PhoneSection data={data} />
-              <div style={{ height: 3, background: C.bg }} />
-              <EmailSection data={data} />
-              <div style={{ height: 3, background: C.bg }} />
-              <CSATSection data={data} />
-              <div style={{ height: 3, background: C.bg }} />
-              <OverallSummary data={data} />
-              <Definitions />
+              {memberData.length > 0 ? (
+                <>
+                  {/* Per-member report cards */}
+                  {memberData.map((md, i) => (
+                    <MemberSection key={md.member.id} memberData={md} index={i} />
+                  ))}
+                  {/* Team summary */}
+                  <TeamSummary memberDataList={memberData} />
+                  <Definitions />
+                </>
+              ) : (
+                <>
+                  {/* Global tier report (no specific members selected) */}
+                  <TierSection tier={1} data={data} />
+                  <div style={{ height: 3, background: C.bg }} />
+                  <TierSection tier={2} data={data} />
+                  <div style={{ height: 3, background: C.bg }} />
+                  <TierSection tier={3} data={data} />
+                  <div style={{ height: 3, background: C.bg }} />
+                  <PhoneSection data={data} />
+                  <div style={{ height: 3, background: C.bg }} />
+                  <EmailSection data={data} />
+                  <div style={{ height: 3, background: C.bg }} />
+                  <CSATSection data={data} />
+                  <div style={{ height: 3, background: C.bg }} />
+                  <OverallSummary data={data} />
+                  <Definitions />
+                </>
+              )}
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
                 <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live D365 + 8x8 data" : "with demo data"} by Service Desk SLA System</p>
               </div>
