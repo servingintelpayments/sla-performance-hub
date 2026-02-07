@@ -764,99 +764,112 @@ function CTooltip({ active, payload, label }) {
    REPORT SECTIONS
    ═══════════════════════════════════════════════════════ */
 
-function TierSection({ tier, data }) {
+/* ─── PROGRESS BAR METRIC CARD ─── */
+function MetricCard({ label, value, target, unit, inverse, color }) {
+  const numVal = parseFloat(value);
+  const numTarget = parseFloat(target);
+  const isNA = value === "N/A" || isNaN(numVal);
+  let pct = isNA ? 0 : inverse ? Math.min(100, (numTarget / Math.max(numVal, 0.01)) * 100) : Math.min(100, (numVal / Math.max(numTarget, 0.01)) * 100);
+  if (unit === " min" || unit === " hrs") pct = isNA ? 0 : numVal <= numTarget ? 100 : Math.max(0, 100 - ((numVal - numTarget) / numTarget) * 100);
+  const met = isNA ? null : inverse ? numVal <= numTarget : numVal >= numTarget;
+  const barColor = isNA ? C.gray : met ? "#2D9D78" : numVal >= numTarget * (inverse ? 0.85 : 0.8) ? C.orange : "#E5544B";
+  const pillColor = isNA ? C.gray : met ? "#2D9D78" : "#E5544B";
+  const displayVal = isNA ? "N/A" : `${value}${unit || ""}`;
+
+  return (
+    <div style={{ background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px", position: "relative", overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
+        <div style={{ padding: "3px 10px", borderRadius: 10, background: pillColor, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>{met === null ? "N/A" : met ? "Met" : "Miss"}</div>
+      </div>
+      <div style={{ height: 10, background: `${barColor}18`, borderRadius: 5, overflow: "hidden", marginBottom: 8 }}>
+        <div style={{ height: "100%", width: `${Math.min(100, Math.max(2, pct))}%`, background: barColor, borderRadius: 5, transition: "width 0.6s ease" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
+        <span style={{ fontSize: 11, color: C.textLight }}>Target: {target}{unit || ""}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ─── STAT CARD (summary row) ─── */
+function StatCard({ label, value, sub, color }) {
+  return (
+    <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: `1.5px solid ${C.border}`, padding: "14px 16px", textAlign: "center" }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: color || C.textDark, fontFamily: "'Space Mono', monospace", lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+/* ─── TIER SECTION — New visual with progress bar cards ─── */
+function TierSection({ tier, data, members }) {
   const t = TIERS[tier]; if (!t) return null;
-  const d = data[`tier${tier}`];
-  return (
-    <div style={{ background: t.colorLight, padding: "24px 28px", borderLeft: `5px solid ${t.color}`, borderRadius: "0 14px 14px 0", marginBottom: 4 }}>
-      <h3 style={{ margin: "0 0 14px", color: t.colorDark, fontSize: 16, fontWeight: 700, textAlign: "center", letterSpacing: 0.5 }}>
-        {t.icon} {t.label.toUpperCase()} — {t.name.toUpperCase()}
-      </h3>
-      <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          {t.metrics.includes("sla_compliance") && <MetricRow label="SLA Compliance" value={d.slaCompliance} unit="%" metricKey="sla_compliance" targetLabel={TARGETS.sla_compliance.label} />}
-          {t.metrics.includes("fcr_rate") && <MetricRow label="FCR Rate" value={d.fcrRate} unit="%" metricKey="fcr_rate" targetLabel={TARGETS.fcr_rate.label} />}
-          {t.metrics.includes("escalation_rate") && <MetricRow label="Escalation Rate" value={d.escalationRate} unit="%" metricKey="escalation_rate" targetLabel={TARGETS.escalation_rate.label} />}
-          {t.metrics.includes("avg_resolution_time") && (
-            <tr>
-              <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Avg Case Resolution Time</td>
-              <td style={{ textAlign: "right", padding: "8px 0" }}>
-                <span style={{ background: C.blue, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.avgResolutionTime}</span>
-                <span style={{ marginLeft: 4 }}>⏱️</span>
-              </td>
-            </tr>
-          )}
-          {t.metrics.includes("total_cases") && <MetricRow label="Total Cases" value={d.total} bold big bigColor={t.colorDark} />}
-          {t.metrics.includes("resolved") && (
-            <tr>
-              <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Resolved</td>
-              <td style={{ textAlign: "right", padding: "8px 0" }}>
-                <span style={{ background: C.gray, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.resolved}</span>
-                <span style={{ marginLeft: 4 }}>📋</span>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+  const d = data[`tier${tier}`]; if (!d) return null;
+  const tierMembers = (members || []).filter(m => m.tier === tier);
+  const slaRate = d.slaCompliance;
+  const slaMet = d.slaMet || 0;
+  const slaMissed = Math.max(0, d.total - slaMet);
 
-function PhoneSection({ data }) {
-  const d = data.phone;
-  return (
-    <div style={{ background: C.greenLight, padding: "24px 28px", borderLeft: `5px solid ${C.green}`, borderRadius: "0 14px 14px 0", marginBottom: 4 }}>
-      <h3 style={{ margin: "0 0 14px", color: "#2e7d32", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📞 PHONE METRICS</h3>
-      <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          <MetricRow label="Total Calls" value={d.totalCalls} bold big bigColor="#2e7d32" />
-          <tr>
-            <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Answered Calls</td>
-            <td style={{ textAlign: "right" }}><span style={{ background: C.green, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.answered}</span> ✅</td>
-          </tr>
-          <tr>
-            <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Abandoned Calls</td>
-            <td style={{ textAlign: "right" }}>
-              <span style={{ background: d.abandoned === 0 ? C.green : C.red, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.abandoned}</span>
-              {d.abandoned === 0 ? " ✅" : " 🔴"}
-            </td>
-          </tr>
-          <MetricRow label="Answer Rate" value={d.answerRate} unit="%" metricKey="answer_rate" targetLabel={TARGETS.answer_rate.label} />
-          <MetricRow label="Avg Phone AHT" value={d.avgAHT} unit=" min" metricKey="avg_phone_aht" targetLabel={TARGETS.avg_phone_aht.label} />
-        </tbody>
-      </table>
-    </div>
-  );
-}
+  // Build metrics for this tier
+  const metrics = [];
+  if (t.metrics.includes("sla_compliance")) metrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%" });
+  if (t.metrics.includes("fcr_rate")) metrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" });
+  if (t.metrics.includes("escalation_rate")) metrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true });
+  if (t.metrics.includes("avg_resolution_time")) {
+    const hrs = parseFloat(d.avgResolutionTime);
+    metrics.push({ label: "Avg Resolution Time", value: isNaN(hrs) ? "N/A" : hrs, target: 6, unit: " hrs" });
+  }
+  // Add email & CSAT if tier 1
+  if (tier === 1 && data.email) {
+    metrics.push({ label: "Email SLA", value: data.email.slaCompliance, target: 90, unit: "%" });
+  }
+  if (tier === 1 && data.csat) {
+    const csatPct = data.csat.avgScore !== "N/A" ? Math.round(data.csat.avgScore / 5 * 100) : "N/A";
+    metrics.push({ label: "CSAT Score", value: data.csat.avgScore, target: 4.0, unit: "/5" });
+  }
+  // Phone metrics for tier 1
+  if (tier === 1 && data.phone) {
+    metrics.push({ label: "Answer Rate", value: data.phone.answerRate, target: 95, unit: "%" });
+    metrics.push({ label: "Avg Handle Time", value: data.phone.avgAHT, target: 6, unit: " min" });
+  }
 
-function EmailSection({ data }) {
-  const d = data.email;
   return (
-    <div style={{ background: C.blueLight, padding: "24px 28px", borderLeft: `5px solid #1976D2`, borderRadius: "0 14px 14px 0", marginBottom: 4 }}>
-      <h3 style={{ margin: "0 0 14px", color: "#1565c0", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📧 EMAIL METRICS</h3>
-      <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          <MetricRow label="Total Email Cases" value={d.total} bold big bigColor="#1565c0" />
-          <tr><td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Responded</td><td style={{ textAlign: "right" }}><span style={{ background: C.blue, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.responded}</span> 💬</td></tr>
-          <tr><td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Resolved</td><td style={{ textAlign: "right" }}><span style={{ background: C.green, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.resolved}</span> ✅</td></tr>
-          <MetricRow label="SLA Compliance" value={d.slaCompliance} unit="%" metricKey="email_sla" targetLabel={TARGETS.email_sla.label} />
-        </tbody>
-      </table>
-    </div>
-  );
-}
+    <div style={{ marginBottom: 24 }}>
+      {/* Tier Header */}
+      <div style={{ background: `linear-gradient(135deg, ${t.color}, ${t.colorDark})`, borderRadius: "14px 14px 0 0", padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#fff" }}>{t.label} {t.name}</h3>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 4 }}>{t.desc}</div>
+        </div>
+        {tierMembers.length > 0 && (
+          <div style={{ display: "flex", gap: -8 }}>
+            {tierMembers.slice(0, 5).map((m, i) => (
+              <div key={m.id} style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", marginLeft: i > 0 ? -6 : 0 }}>{m.avatar}</div>
+            ))}
+            {tierMembers.length > 5 && <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "2px solid rgba(255,255,255,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "#fff", marginLeft: -6 }}>+{tierMembers.length - 5}</div>}
+          </div>
+        )}
+      </div>
 
-function CSATSection({ data }) {
-  const d = data.csat;
-  return (
-    <div style={{ background: C.goldLight, padding: "24px 28px", borderLeft: `5px solid ${C.gold}`, borderRadius: "0 14px 14px 0", marginBottom: 4 }}>
-      <h3 style={{ margin: "0 0 14px", color: "#f57f17", fontSize: 16, fontWeight: 700, textAlign: "center" }}>⭐ CSAT METRICS</h3>
-      <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          <MetricRow label="Total Responses" value={d.responses} bold big bigColor="#f57f17" />
-          <MetricRow label="Avg Score" value={d.avgScore} unit="/5" metricKey="csat_score" targetLabel={TARGETS.csat_score.label} />
-        </tbody>
-      </table>
+      {/* Summary Stats Row */}
+      <div style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
+        <StatCard label={`${t.label} SLA Rate`} value={slaRate === "N/A" ? "N/A" : `${slaRate}%`} color={slaRate !== "N/A" && slaRate >= 90 ? "#2D9D78" : "#E5544B"} />
+        <StatCard label="SLAs Met" value={`${slaMet}/${d.total}`} color="#2D9D78" />
+        <StatCard label="SLAs Missed" value={`${slaMissed}/${d.total}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
+        <StatCard label="Total Cases" value={d.total} color={t.colorDark} />
+        <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
+      </div>
+
+      {/* Metric Cards Grid */}
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>{t.label} Queue SLA Status — All Metrics</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {metrics.map((m, i) => (
+          <MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -868,7 +881,7 @@ function OverallSummary({ data }) {
     { label: "Cases Resolved", value: d.resolved, color: "#81C784" },
     { label: "CSAT Responses", value: d.csatResponses, color: "#FFB74D" },
     { label: "Answered Calls", value: d.answeredCalls, color: "#81C784" },
-    { label: "Abandoned", value: d.abandonedCalls, color: "#f44336" },
+    { label: "Abandoned", value: d.abandonedCalls, color: d.abandonedCalls > 0 ? "#f44336" : "#81C784" },
   ];
   return (
     <div style={{ background: C.primary, padding: "24px 28px", borderRadius: 14, marginBottom: 4 }}>
@@ -896,14 +909,14 @@ function Definitions() {
     ["CSAT Score", "Customer Satisfaction rating (1-5 scale). Target: 4.0+"],
   ];
   return (
-    <div style={{ background: C.grayLight, padding: "24px 28px", borderTop: `1px solid ${C.border}`, borderRadius: "0 0 14px 14px" }}>
+    <div style={{ background: C.grayLight, padding: "24px 28px", borderTop: `1px solid ${C.border}`, borderRadius: "0 0 14px 14px", marginTop: 16 }}>
       <h4 style={{ margin: "0 0 14px", fontSize: 13, color: "#555", fontWeight: 700 }}>📝 DEFINITIONS & METHODOLOGY</h4>
       <table cellPadding="3" cellSpacing="0" style={{ width: "100%", fontSize: 12, color: "#666" }}>
         <tbody>{defs.map(([term, def]) => (<tr key={term}><td style={{ fontWeight: 700, width: 150, verticalAlign: "top", padding: "4px 0" }}>{term}</td><td style={{ padding: "4px 0" }}>{def}</td></tr>))}</tbody>
       </table>
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 12, fontSize: 11, color: "#888", lineHeight: 1.8 }}>
-        <div>✅ Target met &nbsp;|&nbsp; ⚠️ Approaching target &nbsp;|&nbsp; 🔴 Below target &nbsp;|&nbsp; ➖ N/A (no data)</div>
-        <div>📊 <strong>Data Sources:</strong> Microsoft Dynamics 365 Customer Service (Cases) &nbsp;|&nbsp; 8x8 (Phone Metrics)</div>
+        <div>✅ Met &nbsp;|&nbsp; ⚠️ Approaching &nbsp;|&nbsp; 🔴 Miss &nbsp;|&nbsp; ➖ N/A</div>
+        <div>📊 <strong>Data Sources:</strong> Microsoft Dynamics 365 Customer Service &nbsp;|&nbsp; 8x8 Contact Center</div>
       </div>
     </div>
   );
@@ -915,89 +928,47 @@ function MemberSection({ memberData, index }) {
   const m = d.member;
   const colors = [C.blue, C.accent, C.purple, "#2D9D78", C.gold, "#E91E63", "#00BCD4", "#795548"];
   const color = colors[index % colors.length];
-  const colorLight = color + "15";
+  const colorDark = color + "DD";
+  const slaMet = d.slaMet || 0;
+  const slaMissed = Math.max(0, d.totalCases - slaMet);
+
+  const metrics = [
+    { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
+    { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
+    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
+    { label: "Avg Resolution Time", value: parseFloat(d.avgResTime) || "N/A", target: 6, unit: " hrs" },
+    { label: "Email SLA", value: d.emailSla, target: 90, unit: "%" },
+    { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
+  ];
 
   return (
-    <div style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.border}`, marginBottom: 16, overflow: "hidden", animation: "slideIn 0.4s ease" }}>
+    <div style={{ marginBottom: 24 }}>
       {/* Member Header */}
-      <div style={{ background: `linear-gradient(135deg, ${color}, ${color}CC)`, padding: "18px 24px", display: "flex", alignItems: "center", gap: 16 }}>
-        <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", border: "2px solid rgba(255,255,255,0.3)" }}>{m.avatar}</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff" }}>{m.name}</div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", display: "flex", gap: 10, marginTop: 2 }}>
-            <span>{m.role}</span>
-            {m.email && <span>• {m.email}</span>}
+      <div style={{ background: `linear-gradient(135deg, ${color}, ${colorDark})`, borderRadius: "14px 14px 0 0", padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>{m.avatar}</div>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{m.name}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div>
           </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 36, fontWeight: 800, color: "#fff", fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{d.totalCases}</div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>Total Cases</div>
         </div>
       </div>
 
-      {/* Metrics Grid */}
-      <div style={{ padding: "20px 24px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-          {/* Cases Summary */}
-          <div style={{ background: C.greenLight, borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: C.green, fontFamily: "'Space Mono', monospace" }}>{d.resolvedCases}</div>
-            <div style={{ fontSize: 11, color: C.textMid, marginTop: 2 }}>Resolved</div>
-          </div>
-          <div style={{ background: C.blueLight, borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: C.blue, fontFamily: "'Space Mono', monospace" }}>{d.activeCases}</div>
-            <div style={{ fontSize: 11, color: C.textMid, marginTop: 2 }}>Active</div>
-          </div>
-          <div style={{ background: d.escalatedCases > 0 ? C.redLight : C.greenLight, borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: d.escalatedCases > 0 ? C.red : C.green, fontFamily: "'Space Mono', monospace" }}>{d.escalatedCases}</div>
-            <div style={{ fontSize: 11, color: C.textMid, marginTop: 2 }}>Escalated</div>
-          </div>
-        </div>
+      {/* Summary Stats */}
+      <div style={{ display: "flex", gap: 10, padding: "16px 0" }}>
+        <StatCard label="SLA Rate" value={d.slaCompliance === "N/A" ? "N/A" : `${d.slaCompliance}%`} color={d.slaCompliance !== "N/A" && d.slaCompliance >= 90 ? "#2D9D78" : "#E5544B"} />
+        <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color="#2D9D78" />
+        <StatCard label="SLAs Missed" value={`${slaMissed}/${d.totalCases}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
+        <StatCard label="Total Cases" value={d.totalCases} color={color} />
+        <StatCard label="Active" value={d.activeCases} color={C.blue} />
+      </div>
 
-        {/* SLA Metrics Table */}
-        <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
-          <tbody>
-            <MetricRow label="SLA Compliance" value={d.slaCompliance} unit="%" metricKey="sla_compliance" targetLabel={TARGETS.sla_compliance.label} />
-            <MetricRow label="FCR Rate" value={d.fcrRate} unit="%" metricKey="fcr_rate" targetLabel={TARGETS.fcr_rate.label} />
-            <MetricRow label="Escalation Rate" value={d.escalationRate} unit="%" metricKey="escalation_rate" targetLabel={TARGETS.escalation_rate.label} />
-            <tr>
-              <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Avg Resolution Time</td>
-              <td style={{ textAlign: "right", padding: "8px 0" }}>
-                <span style={{ background: C.blue, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.avgResTime}</span>
-                <span style={{ marginLeft: 4 }}>⏱️</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Email & CSAT row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
-          <div style={{ background: C.blueLight, borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#1565c0", marginBottom: 8 }}>📧 EMAIL</div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-              <span style={{ color: C.textMid }}>Cases</span>
-              <span style={{ fontWeight: 700, color: C.textDark }}>{d.emailCases}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-              <span style={{ color: C.textMid }}>Resolved</span>
-              <span style={{ fontWeight: 700, color: C.green }}>{d.emailResolved}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-              <span style={{ color: C.textMid }}>SLA</span>
-              <StatusBadge status={checkTarget("email_sla", d.emailSla)} value={d.emailSla} unit="%" />
-            </div>
-          </div>
-          <div style={{ background: C.goldLight, borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#f57f17", marginBottom: 8 }}>⭐ CSAT</div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-              <span style={{ color: C.textMid }}>Responses</span>
-              <span style={{ fontWeight: 700, color: C.textDark }}>{d.csatResponses}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-              <span style={{ color: C.textMid }}>Avg Score</span>
-              <StatusBadge status={checkTarget("csat_score", d.csatAvg)} value={d.csatAvg} unit="/5" />
-            </div>
-          </div>
-        </div>
+      {/* Metric Cards */}
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {metrics.map((mt, i) => (
+          <MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />
+        ))}
       </div>
     </div>
   );
@@ -1701,18 +1672,9 @@ function Dashboard({ user, onLogout }) {
               ) : (
                 <>
                   {/* Global tier report (no specific members selected) */}
-                  <TierSection tier={1} data={data} />
-                  <div style={{ height: 3, background: C.bg }} />
-                  <TierSection tier={2} data={data} />
-                  <div style={{ height: 3, background: C.bg }} />
-                  <TierSection tier={3} data={data} />
-                  <div style={{ height: 3, background: C.bg }} />
-                  <PhoneSection data={data} />
-                  <div style={{ height: 3, background: C.bg }} />
-                  <EmailSection data={data} />
-                  <div style={{ height: 3, background: C.bg }} />
-                  <CSATSection data={data} />
-                  <div style={{ height: 3, background: C.bg }} />
+                  <TierSection tier={1} data={data} members={teamMembers} />
+                  <TierSection tier={2} data={data} members={teamMembers} />
+                  <TierSection tier={3} data={data} members={teamMembers} />
                   <OverallSummary data={data} />
                   <Definitions />
                 </>
