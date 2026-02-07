@@ -647,7 +647,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     if (ahtData.value?.length > 0) {
       const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes) || 0).filter(n => !isNaN(n));
       if (durations.length > 0) {
-        const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+        const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length / 60);
         phoneAHT = `${avg} min`;
       }
     }
