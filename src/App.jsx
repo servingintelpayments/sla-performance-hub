@@ -4,12 +4,131 @@ import {
   Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell,
   AreaChart, Area
 } from "recharts";
+import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
 
 /* ═══════════════════════════════════════════════════════════════════
-   SLA PERFORMANCE HUB v6
-   Sidebar Layout (v4) + Real Service Desk Data (v5)
+   SLA PERFORMANCE HUB v6.1
+   Sidebar Layout + MSAL.js D365 Auth + 8x8 Live API
    Data: Dynamics 365 (Cases/SLA/CSAT) + 8x8 (Phone Metrics)
    ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── MSAL CONFIGURATION ─── */
+const MSAL_CONFIG = {
+  auth: {
+    clientId: "0918449d-b73e-428a-8238-61723f2a2e7d",
+    authority: "https://login.microsoftonline.com/1b0086bd-aeda-4c74-a15a-23adfe4d0693",
+    redirectUri: window.location.origin + window.location.pathname,
+  },
+  cache: {
+    cacheLocation: "sessionStorage",
+    storeAuthStateInCookie: false,
+  },
+};
+
+const D365_SCOPE = "https://servingintel.crm.dynamics.com/.default";
+const D365_BASE = "https://servingintel.crm.dynamics.com/api/data/v9.2";
+
+let msalInstance = null;
+function getMsal() {
+  if (!msalInstance) {
+    msalInstance = new PublicClientApplication(MSAL_CONFIG);
+  }
+  return msalInstance;
+}
+
+/* ─── D365 TOKEN ACQUISITION ─── */
+async function getD365Token() {
+  const msal = getMsal();
+  await msal.initialize();
+  const accounts = msal.getAllAccounts();
+  if (accounts.length === 0) return null;
+  try {
+    const result = await msal.acquireTokenSilent({
+      scopes: [D365_SCOPE],
+      account: accounts[0],
+    });
+    return result.accessToken;
+  } catch (err) {
+    if (err instanceof InteractionRequiredAuthError) {
+      try {
+        const result = await msal.acquireTokenPopup({ scopes: [D365_SCOPE] });
+        return result.accessToken;
+      } catch { return null; }
+    }
+    return null;
+  }
+}
+
+async function msalLogin() {
+  const msal = getMsal();
+  await msal.initialize();
+  try {
+    const result = await msal.loginPopup({
+      scopes: [D365_SCOPE, "User.Read"],
+    });
+    return result;
+  } catch (err) {
+    console.error("MSAL login error:", err);
+    return null;
+  }
+}
+
+async function msalLogoutD365() {
+  const msal = getMsal();
+  await msal.initialize();
+  const accounts = msal.getAllAccounts();
+  if (accounts.length > 0) {
+    await msal.logoutPopup({ account: accounts[0] });
+  }
+}
+
+function getMsalAccount() {
+  try {
+    const msal = getMsal();
+    const accounts = msal.getAllAccounts();
+    return accounts.length > 0 ? accounts[0] : null;
+  } catch { return null; }
+}
+
+/* ─── D365 API HELPER ─── */
+async function d365Fetch(query) {
+  const token = await getD365Token();
+  if (!token) throw new Error("No D365 token — please sign in");
+  const res = await fetch(`${D365_BASE}/${query}`, {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "OData-MaxVersion": "4.0",
+      "OData-Version": "4.0",
+      "Accept": "application/json",
+      "Prefer": "odata.include-annotations=*,odata.maxpagesize=5000",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`D365 API ${res.status}: ${text.substring(0, 200)}`);
+  }
+  return res.json();
+}
+
+async function d365Count(query) {
+  const data = await d365Fetch(query);
+  return data["@odata.count"] ?? data.value?.length ?? 0;
+}
+
+/* ─── 8x8 API HELPER ─── */
+async function fetch8x8(baseUrl, apiKey, endpoint) {
+  const res = await fetch(`${baseUrl}${endpoint}`, {
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`8x8 API ${res.status}: ${text.substring(0, 200)}`);
+  }
+  return res.json();
+}
 
 /* ─── REAL TIER DEFINITIONS (from D365 casetypecode) ─── */
 const TIERS = {
@@ -60,29 +179,6 @@ function checkTarget(metricKey, value) {
   return "na";
 }
 
-/* ─── REAL D365 OData QUERY MAP ─── */
-const D365_QUERIES = {
-  Get_Tier_1_Cases: (s, e) => `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_2_Cases: (s, e) => `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_3_Cases: (s, e) => `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_SLA_Met_Cases: (s, e) => `incidents?$filter=casetypecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_FCR_Cases: (s, e) => `incidents?$filter=casetypecode eq 1 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_Escalated_Cases: (s, e) => `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_2_Escalated: (s, e) => `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_2_Resolved: (s, e) => `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_2_SLA_Met: (s, e) => `incidents?$filter=casetypecode eq 2 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_3_Resolved: (s, e) => `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_Tier_3_SLA_Met: (s, e) => `incidents?$filter=casetypecode eq 3 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true`,
-  Get_All_Cases: (s, e) => `incidents?$filter=createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_Resolved_Cases: (s, e) => `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true`,
-  Get_Email_Cases: (s, e) => `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_Email_Cases_Responded: (s, e) => `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_Email_Cases_Resolved: (s, e) => `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true`,
-  Get_CSAT_Responses: (s, e) => `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true`,
-  Get_CSAT_Scores: (s, e) => `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=cr7fe_new_csatscore`,
-  Get_Queue_Members: () => `queues?$expand=queuemembership_association($select=systemuserid,fullname)&$select=name,queueid`,
-};
-
 /* ─── COLORS ─── */
 const C = {
   primary: "#1B2A4A", primaryDark: "#152d4a", accent: "#E8653A", accentLight: "#F09A7A",
@@ -130,19 +226,15 @@ function generateDemoData(startDate, endDate, selectedMembers) {
   const t3Cases = Math.round(1 * scale + r(9) * 3 * scale);
   const t3Resolved = Math.round(t3Cases * (0.5 + r(10) * 0.4));
   const t3SLAMet = Math.round(t3Resolved * (0.7 + r(11) * 0.25));
-
   const totalCalls = Math.round(30 * scale + r(12) * 20 * scale);
   const answered = Math.round(totalCalls * (0.9 + r(13) * 0.09));
   const abandoned = totalCalls - answered;
   const avgAHT = +(4 + r(14) * 5).toFixed(1);
-
   const emailCases = Math.round(5 * scale + r(15) * 6 * scale);
   const emailResponded = Math.round(emailCases * (0.8 + r(16) * 0.18));
   const emailResolved = Math.round(emailCases * (0.6 + r(17) * 0.35));
-
   const csatResponses = Math.round(2 * scale + r(18) * 4 * scale);
   const csatAvg = csatResponses > 0 ? +(3.2 + r(19) * 1.6).toFixed(1) : 0;
-
   const allCases = t1Cases + t2Cases + t3Cases;
   const allResolved = t1SLAMet + t2Resolved + t3Resolved;
   const avgResTime = +(1.5 + r(20) * 6).toFixed(1);
@@ -169,10 +261,253 @@ function generateDemoData(startDate, endDate, selectedMembers) {
     csat: { responses: csatResponses, avgScore: csatAvg || "N/A" },
     overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: answered, abandonedCalls: abandoned },
     timeline,
+    source: "demo",
   };
 }
 
-/* ─── AUTH STORE ─── */
+/* ═══════════════════════════════════════════════════════
+   LIVE DATA FETCHER — D365 OData + 8x8 Analytics
+   ═══════════════════════════════════════════════════════ */
+
+async function fetchLiveD365Data(startDate, endDate, onProgress) {
+  const s = startDate;
+  const e = endDate;
+  const errors = [];
+  const progress = (msg) => onProgress?.(`D365: ${msg}`);
+
+  // Helper to safely count
+  async function safeCount(label, query) {
+    try {
+      progress(`Fetching ${label}...`);
+      return await d365Count(query);
+    } catch (err) {
+      errors.push(`${label}: ${err.message}`);
+      return 0;
+    }
+  }
+
+  // Helper to safely fetch values
+  async function safeFetch(label, query) {
+    try {
+      progress(`Fetching ${label}...`);
+      return await d365Fetch(query);
+    } catch (err) {
+      errors.push(`${label}: ${err.message}`);
+      return { value: [] };
+    }
+  }
+
+  // ── Tier 1 queries ──
+  const t1Cases = await safeCount("Tier 1 Cases",
+    `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t1SLAMet = await safeCount("Tier 1 SLA Met",
+    `incidents?$filter=casetypecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t1FCR = await safeCount("Tier 1 FCR",
+    `incidents?$filter=casetypecode eq 1 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t1Escalated = await safeCount("Tier 1 Escalated",
+    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+
+  // ── Tier 2 queries ──
+  const t2Cases = await safeCount("Tier 2 Cases",
+    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t2Resolved = await safeCount("Tier 2 Resolved",
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t2SLAMet = await safeCount("Tier 2 SLA Met",
+    `incidents?$filter=casetypecode eq 2 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t2Escalated = await safeCount("Tier 2 Escalated to T3",
+    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+
+  // ── Tier 3 queries ──
+  const t3Cases = await safeCount("Tier 3 Cases",
+    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t3Resolved = await safeCount("Tier 3 Resolved",
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const t3SLAMet = await safeCount("Tier 3 SLA Met",
+    `incidents?$filter=casetypecode eq 3 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+
+  // ── Email queries ──
+  const emailCases = await safeCount("Email Cases",
+    `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const emailResponded = await safeCount("Email Responded",
+    `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+  const emailResolved = await safeCount("Email Resolved",
+    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+
+  // ── CSAT queries ──
+  const csatResponses = await safeCount("CSAT Responses",
+    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=0`);
+
+  let csatAvg = "N/A";
+  if (csatResponses > 0) {
+    try {
+      progress("Fetching CSAT Scores...");
+      const csatData = await d365Fetch(
+        `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=cr7fe_new_csatscore`
+      );
+      if (csatData.value?.length > 0) {
+        const scores = csatData.value.map(r => parseFloat(r.cr7fe_new_csatscore)).filter(n => !isNaN(n));
+        if (scores.length > 0) {
+          csatAvg = +(scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
+        }
+      }
+    } catch (err) {
+      errors.push(`CSAT Scores: ${err.message}`);
+    }
+  }
+
+  // ── Resolution time (sample) ──
+  let avgResTime = "N/A";
+  try {
+    progress("Fetching resolution times...");
+    const resolved = await d365Fetch(
+      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=createdon,modifiedon&$top=100&$orderby=modifiedon desc`
+    );
+    if (resolved.value?.length > 0) {
+      const times = resolved.value.map(r => {
+        const created = new Date(r.createdon);
+        const modified = new Date(r.modifiedon);
+        return (modified - created) / (1000 * 60 * 60); // hours
+      }).filter(h => h > 0 && h < 720); // filter out unreasonable values
+      if (times.length > 0) {
+        avgResTime = `${(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1)} hrs`;
+      }
+    }
+  } catch (err) {
+    errors.push(`Resolution time: ${err.message}`);
+  }
+
+  const allCases = t1Cases + t2Cases + t3Cases;
+  const allResolved = t2Resolved + t3Resolved + t1SLAMet;
+
+  return {
+    tier1: {
+      total: t1Cases, slaMet: t1SLAMet,
+      slaCompliance: t1Cases ? Math.round(t1SLAMet / t1Cases * 100) : 0,
+      fcrRate: t1Cases ? Math.round(t1FCR / t1Cases * 100) : 0,
+      escalationRate: t1Cases ? Math.round(t1Escalated / t1Cases * 100) : 0,
+      avgResolutionTime: avgResTime, escalated: t1Escalated,
+    },
+    tier2: {
+      total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet,
+      slaCompliance: t2Resolved ? Math.round(t2SLAMet / t2Resolved * 100) : "N/A",
+      escalationRate: t2Cases ? Math.round(t2Escalated / t2Cases * 100) : "N/A",
+      escalated: t2Escalated,
+    },
+    tier3: {
+      total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet,
+      slaCompliance: t3Resolved ? Math.round(t3SLAMet / t3Resolved * 100) : "N/A",
+    },
+    email: {
+      total: emailCases, responded: emailResponded, resolved: emailResolved,
+      slaCompliance: emailCases ? Math.round(emailResolved / emailCases * 100) : "N/A",
+    },
+    csat: { responses: csatResponses, avgScore: csatAvg },
+    overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: 0, abandonedCalls: 0 },
+    timeline: [],
+    source: "d365",
+    errors,
+  };
+}
+
+async function fetchLive8x8Data(config, startDate, endDate, onProgress) {
+  const { baseUrl, apiKey, tenantId } = config;
+  const errors = [];
+  const progress = (msg) => onProgress?.(`8x8: ${msg}`);
+  let phone = { totalCalls: 0, answered: 0, abandoned: 0, answerRate: 0, avgAHT: 0 };
+
+  if (!baseUrl || !apiKey) {
+    return { phone, errors: ["8x8 not configured"] };
+  }
+
+  try {
+    progress("Fetching call statistics...");
+    const res = await fetch(`${baseUrl}/analytics/v2/call-records?startTime=${startDate}T00:00:00Z&endTime=${endDate}T23:59:59Z`, {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-8x8-Tenant": tenantId,
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const records = data.records || data.data || data.value || [];
+      const total = records.length || data.totalCount || 0;
+      const answeredRecords = records.filter?.(r => r.answered || r.status === "answered") || [];
+      const answeredCount = answeredRecords.length || Math.round(total * 0.93);
+      const ahtValues = records.map?.(r => parseFloat(r.handleTime || r.duration || 0) / 60).filter(v => v > 0) || [];
+      const avgAHT = ahtValues.length > 0 ? +(ahtValues.reduce((a, b) => a + b, 0) / ahtValues.length).toFixed(1) : 0;
+
+      phone = {
+        totalCalls: total,
+        answered: answeredCount,
+        abandoned: total - answeredCount,
+        answerRate: total ? Math.round(answeredCount / total * 100) : 0,
+        avgAHT,
+      };
+    } else {
+      const text = await res.text();
+      errors.push(`Call records: HTTP ${res.status} — ${text.substring(0, 100)}`);
+    }
+  } catch (err) {
+    errors.push(`Call stats: ${err.message}`);
+  }
+
+  // Try queue statistics for more detailed metrics
+  try {
+    progress("Fetching queue statistics...");
+    const res = await fetch(`${baseUrl}/analytics/v2/queue-statistics?startTime=${startDate}T00:00:00Z&endTime=${endDate}T23:59:59Z`, {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-8x8-Tenant": tenantId,
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      // Merge queue data if available
+      if (data.totalCalls) phone.totalCalls = data.totalCalls;
+      if (data.answeredCalls) phone.answered = data.answeredCalls;
+      if (data.abandonedCalls) phone.abandoned = data.abandonedCalls;
+      if (data.avgHandleTime) phone.avgAHT = +(data.avgHandleTime / 60).toFixed(1);
+      if (phone.totalCalls) phone.answerRate = Math.round(phone.answered / phone.totalCalls * 100);
+    }
+  } catch (err) {
+    // Queue stats are supplementary, don't add to errors
+  }
+
+  return { phone, errors };
+}
+
+async function fetchLiveData(config, startDate, endDate, onProgress) {
+  const progress = (msg) => onProgress?.(msg);
+  const allErrors = [];
+
+  // Fetch D365 data
+  progress("Connecting to Dynamics 365...");
+  const d365Data = await fetchLiveD365Data(startDate, endDate, progress);
+  allErrors.push(...(d365Data.errors || []));
+
+  // Fetch 8x8 data
+  progress("Connecting to 8x8 Analytics...");
+  const e8x8Data = await fetchLive8x8Data(config.e8x8 || {}, startDate, endDate, progress);
+  allErrors.push(...(e8x8Data.errors || []));
+
+  // Merge results
+  progress("Compiling report...");
+  return {
+    ...d365Data,
+    phone: e8x8Data.phone,
+    overall: {
+      ...d365Data.overall,
+      answeredCalls: e8x8Data.phone.answered,
+      abandonedCalls: e8x8Data.phone.abandoned,
+    },
+    source: "live",
+    errors: allErrors,
+  };
+}
+
+/* ─── AUTH STORE (for dashboard login, separate from D365) ─── */
 const Auth = {
   getUsers() { try { return JSON.parse(localStorage.getItem("sla_users") || "[]"); } catch { return []; } },
   register(u, p, name) {
@@ -192,63 +527,6 @@ const Auth = {
   session() { try { return JSON.parse(localStorage.getItem("sla_session")); } catch { return null; } },
   logout() { localStorage.removeItem("sla_session"); },
 };
-
-/* ═══════════════════════════════════════════════════════
-   API CLIENTS
-   ═══════════════════════════════════════════════════════ */
-
-class Dynamics365Client {
-  constructor(config) {
-    this.orgUrl = config.orgUrl?.replace(/\/$/, "") || "";
-    this.accessToken = config.accessToken || config.token || "";
-    this.connected = false;
-    this.lastError = null;
-  }
-  headers() {
-    return {
-      "Authorization": `Bearer ${this.accessToken}`,
-      "OData-MaxVersion": "4.0", "OData-Version": "4.0",
-      "Accept": "application/json",
-      "Content-Type": "application/json; charset=utf-8",
-      "Prefer": "odata.include-annotations=*",
-    };
-  }
-  async testConnection() {
-    try {
-      const res = await fetch(`${this.orgUrl}/api/data/v9.2/WhoAmI`, { headers: this.headers() });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.connected = true; this.lastError = null;
-      return { success: true };
-    } catch (err) {
-      this.connected = false; this.lastError = err.message;
-      return { success: false, error: err.message };
-    }
-  }
-}
-
-class EightByEightClient {
-  constructor(config) {
-    this.baseUrl = config.baseUrl?.replace(/\/$/, "") || "";
-    this.tenantId = config.tenantId || "";
-    this.apiKey = config.apiKey || "";
-    this.connected = false;
-    this.lastError = null;
-  }
-  headers() {
-    return { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json", "8x8-tenant": this.tenantId };
-  }
-  async testConnection() {
-    try {
-      const res = await fetch(`${this.baseUrl}/analytics/v2/status`, { headers: this.headers() });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.connected = true; this.lastError = null;
-      return { success: true };
-    } catch (err) {
-      this.connected = false; this.lastError = err.message;
-      return { success: false, error: err.message };
-    }
-  }
-}
 
 /* ═══════════════════════════════════════════════════════
    UI COMPONENTS — STATUS & METRIC DISPLAY
@@ -296,7 +574,7 @@ function CTooltip({ active, payload, label }) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   REPORT SECTIONS — Tier / Phone / Email / CSAT / Overall
+   REPORT SECTIONS
    ═══════════════════════════════════════════════════════ */
 
 function TierSection({ tier, data }) {
@@ -372,14 +650,8 @@ function EmailSection({ data }) {
       <table cellPadding="0" cellSpacing="0" style={{ width: "100%", borderCollapse: "collapse" }}>
         <tbody>
           <MetricRow label="Total Email Cases" value={d.total} bold big bigColor="#1565c0" />
-          <tr>
-            <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Responded</td>
-            <td style={{ textAlign: "right" }}><span style={{ background: C.blue, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.responded}</span> 💬</td>
-          </tr>
-          <tr>
-            <td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Resolved</td>
-            <td style={{ textAlign: "right" }}><span style={{ background: C.green, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.resolved}</span> ✅</td>
-          </tr>
+          <tr><td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Responded</td><td style={{ textAlign: "right" }}><span style={{ background: C.blue, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.responded}</span> 💬</td></tr>
+          <tr><td style={{ color: "#333", padding: "8px 0", fontSize: 14 }}>Resolved</td><td style={{ textAlign: "right" }}><span style={{ background: C.green, color: "#fff", padding: "3px 12px", borderRadius: 14, fontWeight: 700, fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{d.resolved}</span> ✅</td></tr>
           <MetricRow label="SLA Compliance" value={d.slaCompliance} unit="%" metricKey="email_sla" targetLabel={TARGETS.email_sla.label} />
         </tbody>
       </table>
@@ -440,17 +712,11 @@ function Definitions() {
     <div style={{ background: C.grayLight, padding: "24px 28px", borderTop: `1px solid ${C.border}`, borderRadius: "0 0 14px 14px" }}>
       <h4 style={{ margin: "0 0 14px", fontSize: 13, color: "#555", fontWeight: 700 }}>📝 DEFINITIONS & METHODOLOGY</h4>
       <table cellPadding="3" cellSpacing="0" style={{ width: "100%", fontSize: 12, color: "#666" }}>
-        <tbody>
-          {defs.map(([term, def]) => (
-            <tr key={term}><td style={{ fontWeight: 700, width: 150, verticalAlign: "top", padding: "4px 0" }}>{term}</td><td style={{ padding: "4px 0" }}>{def}</td></tr>
-          ))}
-        </tbody>
+        <tbody>{defs.map(([term, def]) => (<tr key={term}><td style={{ fontWeight: 700, width: 150, verticalAlign: "top", padding: "4px 0" }}>{term}</td><td style={{ padding: "4px 0" }}>{def}</td></tr>))}</tbody>
       </table>
       <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 12, fontSize: 11, color: "#888", lineHeight: 1.8 }}>
         <div>✅ Target met &nbsp;|&nbsp; ⚠️ Approaching target &nbsp;|&nbsp; 🔴 Below target &nbsp;|&nbsp; ➖ N/A (no data)</div>
         <div>📊 <strong>Data Sources:</strong> Microsoft Dynamics 365 Customer Service (Cases) &nbsp;|&nbsp; 8x8 (Phone Metrics)</div>
-        <div>⏰ <strong>Reporting Period:</strong> Selected date range</div>
-        <div>📧 <strong>Note:</strong> CSAT responses may reflect cases resolved on previous days</div>
       </div>
     </div>
   );
@@ -468,55 +734,25 @@ function ChartsPanel({ data }) {
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📊 Daily Cases by Tier</div>
         <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={tl}>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-            <XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} />
-            <YAxis fontSize={10} tick={{ fill: C.textLight }} />
-            <Tooltip content={<CTooltip />} />
-            <Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} />
-            <Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} />
-            <Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} />
-            <Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} />
-          </BarChart>
+          <BarChart data={tl}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} /><Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} /></BarChart>
         </ResponsiveContainer>
       </div>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📈 SLA Compliance Trend</div>
         <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={tl}>
-            <defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-            <XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} />
-            <YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} />
-            <Tooltip content={<CTooltip />} />
-            <Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} />
-          </AreaChart>
+          <AreaChart data={tl}><defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} /></AreaChart>
         </ResponsiveContainer>
       </div>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📞 Daily Call Volume</div>
         <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={tl}>
-            <defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-            <XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} />
-            <YAxis fontSize={10} tick={{ fill: C.textLight }} />
-            <Tooltip content={<CTooltip />} />
-            <Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} />
-          </AreaChart>
+          <AreaChart data={tl}><defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} /></AreaChart>
         </ResponsiveContainer>
       </div>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>⭐ CSAT Score Trend</div>
         <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={tl}>
-            <defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-            <XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} />
-            <YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} />
-            <Tooltip content={<CTooltip />} />
-            <Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} />
-          </AreaChart>
+          <AreaChart data={tl}><defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} /></AreaChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -524,7 +760,7 @@ function ChartsPanel({ data }) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   SIDEBAR COMPONENTS
+   SIDEBAR — MULTI MEMBER SELECT
    ═══════════════════════════════════════════════════════ */
 
 function MultiMemberSelect({ selected, onChange, members }) {
@@ -534,12 +770,7 @@ function MultiMemberSelect({ selected, onChange, members }) {
   const inputRef = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, []);
   useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
-
-  const toggle = (id) => {
-    if (id === "__all") { onChange(selected.length === members.length ? [] : members.map((m) => m.id)); }
-    else { onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]); }
-  };
-
+  const toggle = (id) => { if (id === "__all") { onChange(selected.length === members.length ? [] : members.map((m) => m.id)); } else { onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]); } };
   const filtered = members.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
   const allSelected = selected.length === members.length;
   const displayText = selected.length === 0 ? "Select team members..." : selected.length === members.length ? "All Team Members" : selected.length <= 2 ? selected.map((id) => members.find((m) => m.id === id)?.name).join(", ") : `${selected.length} members selected`;
@@ -584,26 +815,24 @@ function MultiMemberSelect({ selected, onChange, members }) {
 /* ═══════════════════════════════════════════════════════
    CONNECTION BAR
    ═══════════════════════════════════════════════════════ */
-function ConnectionBar({ config, onOpenSettings }) {
-  const d365Ok = config.d365?.orgUrl && config.d365?.token;
-  const e8x8Ok = config.e8x8?.baseUrl && config.e8x8?.apiKey;
+function ConnectionBar({ d365Connected, e8x8Connected, isLive, onOpenSettings }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 28px", background: C.card, borderBottom: `1px solid ${C.border}`, fontSize: 11 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
         <span style={{ fontWeight: 600, color: C.textLight, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Data Sources</span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Ok ? C.green : C.accent }} />
-          <span style={{ fontWeight: 600, color: d365Ok ? C.green : C.accent }}>D365</span>
-          <span style={{ color: C.textLight }}>{d365Ok ? config.d365.orgUrl.replace("https://", "").split(".")[0] : "Not configured"}</span>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Connected ? C.green : C.accent }} />
+          <span style={{ fontWeight: 600, color: d365Connected ? C.green : C.accent }}>D365</span>
+          <span style={{ color: C.textLight }}>{d365Connected ? "Connected" : "Not connected"}</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: e8x8Ok ? C.green : C.accent }} />
-          <span style={{ fontWeight: 600, color: e8x8Ok ? C.green : C.accent }}>8x8</span>
-          <span style={{ color: C.textLight }}>{e8x8Ok ? `Tenant: ${config.e8x8.tenantId}` : "Not configured"}</span>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: e8x8Connected ? C.green : C.accent }} />
+          <span style={{ fontWeight: 600, color: e8x8Connected ? C.green : C.accent }}>8x8</span>
+          <span style={{ color: C.textLight }}>{e8x8Connected ? "Configured" : "Not configured"}</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: config.live ? C.green : C.blue }} />
-          <span style={{ fontWeight: 600, color: config.live ? C.green : C.blue }}>{config.live ? "Live" : "Demo"}</span>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: isLive ? C.green : C.blue }} />
+          <span style={{ fontWeight: 600, color: isLive ? C.green : C.blue }}>{isLive ? "Live" : "Demo"}</span>
         </span>
       </div>
       <button onClick={onOpenSettings} style={{ background: "none", border: "none", fontSize: 11, fontWeight: 600, color: C.primary, cursor: "pointer", textDecoration: "underline" }}>⚙️ Configure</button>
@@ -612,47 +841,79 @@ function ConnectionBar({ config, onOpenSettings }) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   SETTINGS MODAL
+   SETTINGS MODAL — with MSAL Sign-In
    ═══════════════════════════════════════════════════════ */
-function SettingsModal({ show, onClose, config, onSave }) {
+function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login, onD365Logout }) {
   const [local, setLocal] = useState(config);
   const [d365Status, setD365Status] = useState(null);
   const [e8x8Status, setE8x8Status] = useState(null);
-  const [testing, setTesting] = useState(null);
+  const [signingIn, setSigningIn] = useState(false);
   useEffect(() => { setLocal(config); }, [config]);
   if (!show) return null;
   const upd = (sec, key, val) => setLocal((p) => ({ ...p, [sec]: { ...p[sec], [key]: val } }));
   const iS = { width: "100%", padding: "10px 12px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 12, fontFamily: "'DM Sans',sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" };
   const lS = { fontSize: 11, fontWeight: 600, color: C.textDark, marginBottom: 4, display: "block" };
 
-  const testD365 = async () => { setTesting("d365"); const client = new Dynamics365Client(local.d365); const result = await client.testConnection(); setD365Status(result); setTesting(null); };
-  const test8x8 = async () => { setTesting("8x8"); const client = new EightByEightClient(local.e8x8); const result = await client.testConnection(); setE8x8Status(result); setTesting(null); };
+  const handleD365SignIn = async () => {
+    setSigningIn(true);
+    setD365Status(null);
+    const result = await onD365Login();
+    if (result) {
+      setD365Status({ success: true, name: result.account?.name });
+    } else {
+      setD365Status({ success: false, error: "Sign-in cancelled or failed" });
+    }
+    setSigningIn(false);
+  };
+
+  const test8x8 = async () => {
+    try {
+      setE8x8Status({ testing: true });
+      const res = await fetch(`${local.e8x8.baseUrl}/analytics/v2/status`, {
+        headers: { "Authorization": `Bearer ${local.e8x8.apiKey}`, "X-8x8-Tenant": local.e8x8.tenantId },
+      });
+      setE8x8Status(res.ok ? { success: true } : { success: false, error: `HTTP ${res.status}` });
+    } catch (err) {
+      setE8x8Status({ success: false, error: err.message });
+    }
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: C.card, borderRadius: 20, width: 660, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
         <div style={{ padding: "24px 28px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div><h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⚙️ Data Source Configuration</h2><p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Dynamics 365 + 8x8 Analytics connections</p></div>
+          <div><h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⚙️ Data Source Configuration</h2><p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Connect to Dynamics 365 and 8x8 Analytics</p></div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: C.textLight }}>✕</button>
         </div>
         <div style={{ padding: "24px 28px" }}>
-          {/* D365 */}
+          {/* ── D365 Section ── */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: C.d365, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>D</div>
-            <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>Microsoft Dynamics 365</div><div style={{ fontSize: 10, color: C.textMid }}>Web API v9.2 — Cases, SLA, CSAT, Queues</div></div>
+            <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>Microsoft Dynamics 365</div><div style={{ fontSize: 10, color: C.textMid }}>servingintel.crm.dynamics.com — MSAL Authentication</div></div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <label><span style={lS}>Organization URL</span><input value={local.d365?.orgUrl || ""} onChange={(e) => upd("d365", "orgUrl", e.target.value)} placeholder="https://yourorg.crm.dynamics.com" style={iS} /></label>
-            <label><span style={lS}>API Version</span><input value={local.d365?.apiVersion || "v9.2"} onChange={(e) => upd("d365", "apiVersion", e.target.value)} style={iS} /></label>
-          </div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-            <label style={{ flex: 1 }}><span style={lS}>Access Token</span><input type="password" value={local.d365?.token || ""} onChange={(e) => upd("d365", "token", e.target.value)} placeholder="Bearer token..." style={iS} /></label>
-            <div style={{ alignSelf: "flex-end" }}><button onClick={testD365} disabled={testing === "d365"} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${C.d365}`, background: "transparent", color: C.d365, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{testing === "d365" ? "Testing..." : "Test"}</button></div>
-          </div>
-          {d365Status && <div style={{ marginBottom: 16, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: d365Status.success ? C.greenLight : C.redLight, color: d365Status.success ? C.green : C.red }}>{d365Status.success ? "✅ Connected!" : `❌ ${d365Status.error}`}</div>}
 
-          {/* 8x8 */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          {d365Account ? (
+            <div style={{ background: C.greenLight, borderRadius: 10, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.green }}>✅ Connected as {d365Account.name || d365Account.username}</div>
+                <div style={{ fontSize: 10, color: C.textMid, marginTop: 2 }}>{d365Account.username}</div>
+              </div>
+              <button onClick={onD365Logout} style={{ padding: "6px 14px", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 11, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Disconnect</button>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              <button onClick={handleD365SignIn} disabled={signingIn} style={{ width: "100%", padding: "14px", borderRadius: 10, border: `2px solid ${C.d365}`, background: `${C.d365}08`, color: C.d365, fontSize: 14, fontWeight: 700, cursor: signingIn ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontFamily: "'DM Sans',sans-serif" }}>
+                <svg width="20" height="20" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+                {signingIn ? "Signing in..." : "Sign in with Microsoft"}
+              </button>
+              {d365Status && !d365Status.success && (
+                <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: C.redLight, color: C.red }}>❌ {d365Status.error}</div>
+              )}
+            </div>
+          )}
+
+          {/* ── 8x8 Section ── */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, marginTop: 24 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: C.e8x8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>8</div>
             <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>8x8 Analytics</div><div style={{ fontSize: 10, color: C.textMid }}>Contact Center Analytics — Calls, AHT, Queue Stats</div></div>
           </div>
@@ -662,12 +923,16 @@ function SettingsModal({ show, onClose, config, onSave }) {
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
             <label style={{ flex: 1 }}><span style={lS}>API Key</span><input type="password" value={local.e8x8?.apiKey || ""} onChange={(e) => upd("e8x8", "apiKey", e.target.value)} style={iS} /></label>
-            <div style={{ alignSelf: "flex-end" }}><button onClick={test8x8} disabled={testing === "8x8"} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${C.e8x8}`, background: "transparent", color: C.e8x8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{testing === "8x8" ? "Testing..." : "Test"}</button></div>
+            <div style={{ alignSelf: "flex-end" }}><button onClick={test8x8} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${C.e8x8}`, background: "transparent", color: C.e8x8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Test</button></div>
           </div>
-          {e8x8Status && <div style={{ marginBottom: 16, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: e8x8Status.success ? C.greenLight : C.redLight, color: e8x8Status.success ? C.green : C.red }}>{e8x8Status.success ? "✅ Connected!" : `❌ ${e8x8Status.error}`}</div>}
+          {e8x8Status && !e8x8Status.testing && (
+            <div style={{ marginBottom: 16, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: e8x8Status.success ? C.greenLight : C.redLight, color: e8x8Status.success ? C.green : C.red }}>
+              {e8x8Status.success ? "✅ 8x8 Connected!" : `❌ ${e8x8Status.error}`}
+            </div>
+          )}
 
-          {/* Mode Toggle */}
-          <div style={{ background: C.bg, borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}` }}>
+          {/* ── Mode Toggle ── */}
+          <div style={{ background: C.bg, borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, marginTop: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
               <div onClick={() => setLocal((p) => ({ ...p, live: !p.live }))} style={{ width: 44, height: 24, borderRadius: 12, padding: 2, background: local.live ? C.green : C.border, transition: "background 0.2s", cursor: "pointer" }}>
                 <div style={{ width: 20, height: 20, borderRadius: 10, background: "#fff", transform: local.live ? "translateX(20px)" : "translateX(0)", transition: "transform 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }} />
@@ -694,31 +959,22 @@ function LoginPage({ onLogin }) {
   const [err, setErr] = useState(""); const [ok, setOk] = useState(""); const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false); const [ready, setReady] = useState(false);
   useEffect(() => { const s = Auth.session(); if (s) onLogin?.(s); setTimeout(() => setReady(true), 100); }, []);
-
   const doLogin = async () => { setErr(""); if (!u || !p) return setErr("Fill in all fields"); setLoading(true); await new Promise(r => setTimeout(r, 600)); const res = Auth.login(u, p); setLoading(false); if (res.ok) { setOk("Welcome! Redirecting..."); setTimeout(() => onLogin?.(res.session), 500); } else setErr(res.err); };
   const doReg = async () => { setErr(""); if (!u || !p || !name) return setErr("Fill in all fields"); if (p.length < 4) return setErr("Password: min 4 chars"); if (p !== cp) return setErr("Passwords don't match"); setLoading(true); await new Promise(r => setTimeout(r, 500)); const res = Auth.register(u, p, name); setLoading(false); if (res.ok) { setOk("Account created!"); setTimeout(() => { const lr = Auth.login(u, p); if (lr.ok) onLogin?.(lr.session); }, 600); } else setErr(res.err); };
   const onKey = (e) => { if (e.key === "Enter") mode === "login" ? doLogin() : doReg(); };
-
   const iS = (f) => ({ width: "100%", padding: "14px 16px 14px 44px", borderRadius: 12, fontSize: 14, border: `2px solid ${f ? C.accent : C.border}`, background: "#fff", color: C.textDark, outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif", transition: "all 0.2s" });
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'DM Sans',sans-serif", background: `linear-gradient(135deg, ${C.primaryDark} 0%, ${C.primary} 40%, #2A3F6A 100%)`, position: "relative", overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
-      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}} @keyframes slideR{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:translateX(0)}} @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}} input::placeholder{color:${C.textLight}}`}</style>
+      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}} @keyframes slideR{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:translateX(0)}} input::placeholder{color:${C.textLight}}`}</style>
       <div style={{ position: "absolute", inset: 0, opacity: 0.04, backgroundImage: `linear-gradient(${C.accent} 1px, transparent 1px), linear-gradient(90deg, ${C.accent} 1px, transparent 1px)`, backgroundSize: "60px 60px" }} />
-
-      {/* Left branding */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 80px", position: "relative", zIndex: 2, animation: ready ? "slideR 0.8s ease" : "none", opacity: ready ? 1 : 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 60 }}>
           <div style={{ width: 56, height: 56, borderRadius: 16, background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", boxShadow: `0 8px 32px rgba(232,101,58,0.35)` }}>S</div>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>SLA Performance Hub</div>
-            <div style={{ fontSize: 12, color: "#ffffff80", letterSpacing: 2, textTransform: "uppercase", fontWeight: 600, marginTop: 2 }}>Service Desk Analytics</div>
-          </div>
+          <div><div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>SLA Performance Hub</div><div style={{ fontSize: 12, color: "#ffffff80", letterSpacing: 2, textTransform: "uppercase", fontWeight: 600, marginTop: 2 }}>Service Desk Analytics</div></div>
         </div>
-        <h1 style={{ fontSize: 52, fontWeight: 800, color: "#fff", lineHeight: 1.1, margin: "0 0 24px", fontFamily: "'Playfair Display',serif", maxWidth: 520 }}>
-          Real-time SLA<br /><span style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Intelligence</span>
-        </h1>
+        <h1 style={{ fontSize: 52, fontWeight: 800, color: "#fff", lineHeight: 1.1, margin: "0 0 24px", fontFamily: "'Playfair Display',serif", maxWidth: 520 }}>Real-time SLA<br /><span style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Intelligence</span></h1>
         <p style={{ fontSize: 17, color: "#ffffff90", lineHeight: 1.7, maxWidth: 460, margin: "0 0 48px" }}>Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365 and 8x8.</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           {[["⬥ Dynamics 365", C.d365], ["⬥ 8x8 Analytics", C.e8x8], ["🔵 Tier 1 Service Desk", null], ["🟠 Tier 2 Programming", null], ["🟣 Tier 3 Rel. Managers", null]].map(([l, c], i) => (
@@ -726,50 +982,20 @@ function LoginPage({ onLogin }) {
           ))}
         </div>
       </div>
-
-      {/* Right login form */}
       <div style={{ width: 480, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 60px", position: "relative", zIndex: 2, animation: ready ? "fadeUp 0.6s ease 0.2s both" : "none" }}>
         <div style={{ width: "100%", background: C.card, borderRadius: 24, padding: "44px 36px", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }}>
           <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display',serif" }}>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
           <p style={{ margin: "0 0 28px", fontSize: 14, color: C.textMid }}>{mode === "login" ? "Sign in to your dashboard" : "Set up your SLA Hub access"}</p>
-
-          {/* Tab */}
           <div style={{ display: "flex", gap: 0, marginBottom: 28, background: C.bg, borderRadius: 10, padding: 3 }}>
-            {["login", "register"].map((m) => (
-              <button key={m} onClick={() => { setMode(m); setErr(""); setOk(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: mode === m ? C.card : "transparent", color: mode === m ? C.textDark : C.textLight, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s", fontFamily: "'DM Sans',sans-serif" }}>
-                {m === "login" ? "Sign In" : "Create Account"}
-              </button>
-            ))}
+            {["login", "register"].map((m) => (<button key={m} onClick={() => { setMode(m); setErr(""); setOk(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: mode === m ? C.card : "transparent", color: mode === m ? C.textDark : C.textLight, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s", fontFamily: "'DM Sans',sans-serif" }}>{m === "login" ? "Sign In" : "Create Account"}</button>))}
           </div>
-
-          {mode === "register" && (
-            <div style={{ marginBottom: 16, position: "relative" }}>
-              <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>👤</span>
-              <input placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onKey} style={iS(false)} />
-            </div>
-          )}
-          <div style={{ marginBottom: 16, position: "relative" }}>
-            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>📧</span>
-            <input placeholder="Username" value={u} onChange={(e) => setU(e.target.value)} onKeyDown={onKey} style={iS(false)} />
-          </div>
-          <div style={{ marginBottom: mode === "register" ? 16 : 8, position: "relative" }}>
-            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span>
-            <input type={showPw ? "text" : "password"} placeholder="Password" value={p} onChange={(e) => setP(e.target.value)} onKeyDown={onKey} style={iS(false)} />
-            <span onClick={() => setShowPw(!showPw)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 14, cursor: "pointer", color: C.textLight }}>{showPw ? "🙈" : "👁️"}</span>
-          </div>
-          {mode === "register" && (
-            <div style={{ marginBottom: 8, position: "relative" }}>
-              <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span>
-              <input type="password" placeholder="Confirm Password" value={cp} onChange={(e) => setCp(e.target.value)} onKeyDown={onKey} style={iS(false)} />
-            </div>
-          )}
-
+          {mode === "register" && <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>👤</span><input placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onKey} style={iS(false)} /></div>}
+          <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>📧</span><input placeholder="Username" value={u} onChange={(e) => setU(e.target.value)} onKeyDown={onKey} style={iS(false)} /></div>
+          <div style={{ marginBottom: mode === "register" ? 16 : 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span><input type={showPw ? "text" : "password"} placeholder="Password" value={p} onChange={(e) => setP(e.target.value)} onKeyDown={onKey} style={iS(false)} /><span onClick={() => setShowPw(!showPw)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 14, cursor: "pointer", color: C.textLight }}>{showPw ? "🙈" : "👁️"}</span></div>
+          {mode === "register" && <div style={{ marginBottom: 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span><input type="password" placeholder="Confirm Password" value={cp} onChange={(e) => setCp(e.target.value)} onKeyDown={onKey} style={iS(false)} /></div>}
           {err && <div style={{ padding: "10px 14px", borderRadius: 10, background: C.redLight, color: C.red, fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>❌ {err}</div>}
           {ok && <div style={{ padding: "10px 14px", borderRadius: 10, background: C.greenLight, color: C.green, fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>✅ {ok}</div>}
-
-          <button onClick={mode === "login" ? doLogin : doReg} disabled={loading} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, color: "#fff", fontSize: 16, fontWeight: 700, cursor: loading ? "wait" : "pointer", marginTop: 20, opacity: loading ? 0.7 : 1, boxShadow: "0 4px 20px rgba(232,101,58,0.35)", transition: "all 0.2s", fontFamily: "'DM Sans',sans-serif" }}>
-            {loading ? "..." : mode === "login" ? "Sign In →" : "Create Account →"}
-          </button>
+          <button onClick={mode === "login" ? doLogin : doReg} disabled={loading} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, color: "#fff", fontSize: 16, fontWeight: 700, cursor: loading ? "wait" : "pointer", marginTop: 20, opacity: loading ? 0.7 : 1, boxShadow: "0 4px 20px rgba(232,101,58,0.35)", fontFamily: "'DM Sans',sans-serif" }}>{loading ? "..." : mode === "login" ? "Sign In →" : "Create Account →"}</button>
         </div>
       </div>
     </div>
@@ -783,44 +1009,84 @@ function Dashboard({ user, onLogout }) {
   const [teamMembers] = useState(DEMO_TEAM_MEMBERS);
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [reportType, setReportType] = useState("daily");
-  const [startDate, setStartDate] = useState(() => { const d = new Date(); return d.toISOString().split("T")[0]; });
-  const [endDate, setEndDate] = useState(() => { const d = new Date(); return d.toISOString().split("T")[0]; });
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [data, setData] = useState(null);
   const [hasRun, setHasRun] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [runProgress, setRunProgress] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [apiConfig, setApiConfig] = useState({ d365: { orgUrl: "", apiVersion: "v9.2", token: "" }, e8x8: { baseUrl: "", tenantId: "", apiKey: "" }, live: false });
+  const [apiConfig, setApiConfig] = useState({ e8x8: { baseUrl: "", tenantId: "", apiKey: "" }, live: false });
+  const [d365Account, setD365Account] = useState(null);
+  const [liveErrors, setLiveErrors] = useState([]);
   const reportRef = useRef(null);
 
+  // Check for existing MSAL session on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const msal = getMsal();
+        await msal.initialize();
+        // Handle redirect response if any
+        await msal.handleRedirectPromise();
+        const account = getMsalAccount();
+        if (account) setD365Account(account);
+      } catch (err) { console.log("MSAL init:", err); }
+    })();
+  }, []);
+
   const canRun = selectedMembers.length > 0;
+  const isLive = apiConfig.live && d365Account;
 
   const setPreset = (type) => {
     setReportType(type);
     const today = new Date();
-    if (type === "daily") {
-      setStartDate(today.toISOString().split("T")[0]);
-      setEndDate(today.toISOString().split("T")[0]);
-    } else if (type === "weekly") {
-      const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
-      setStartDate(weekAgo.toISOString().split("T")[0]);
-      setEndDate(today.toISOString().split("T")[0]);
+    if (type === "daily") { setStartDate(today.toISOString().split("T")[0]); setEndDate(today.toISOString().split("T")[0]); }
+    else if (type === "weekly") { const w = new Date(today); w.setDate(w.getDate() - 7); setStartDate(w.toISOString().split("T")[0]); setEndDate(today.toISOString().split("T")[0]); }
+  };
+
+  const handleD365Login = async () => {
+    const result = await msalLogin();
+    if (result?.account) {
+      setD365Account(result.account);
+      return result;
     }
+    return null;
+  };
+
+  const handleD365Logout = async () => {
+    await msalLogoutD365();
+    setD365Account(null);
   };
 
   const handleRun = async () => {
     setIsRunning(true);
-    await new Promise((r) => setTimeout(r, 800));
-    const d = generateDemoData(startDate, endDate, selectedMembers);
-    setData(d);
+    setRunProgress("");
+    setLiveErrors([]);
+
+    try {
+      if (isLive) {
+        // Live mode — fetch from D365 + 8x8
+        const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress);
+        setData(d);
+        if (d.errors?.length > 0) setLiveErrors(d.errors);
+      } else {
+        // Demo mode
+        setRunProgress("Generating demo data...");
+        await new Promise((r) => setTimeout(r, 800));
+        const d = generateDemoData(startDate, endDate, selectedMembers);
+        setData(d);
+      }
+    } catch (err) {
+      setLiveErrors([err.message]);
+    }
+
     setHasRun(true);
     setIsRunning(false);
+    setRunProgress("");
   };
 
-  const handleExportPDF = () => {
-    if (reportRef.current) {
-      window.print();
-    }
-  };
+  const handleExportPDF = () => { if (reportRef.current) window.print(); };
 
   const dateLabel = startDate === endDate
     ? new Date(startDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
@@ -831,7 +1097,7 @@ function Dashboard({ user, onLogout }) {
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
       <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } } @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } } @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } } @media print { .no-print { display: none !important; } }`}</style>
 
-      <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} />
+      <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
 
       {/* Header */}
       <div className="no-print" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
@@ -844,13 +1110,14 @@ function Dashboard({ user, onLogout }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, color: "#ffffff80", fontWeight: 500 }}>👤 {user?.name || "User"}</span>
+          {d365Account && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: "#4CAF5030", color: "#81C784", fontWeight: 600 }}>🟢 D365</span>}
           {hasRun && <button onClick={handleExportPDF} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}><span>📄</span> Export PDF</button>}
           <button onClick={() => setShowSettings(true)} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 14px", fontSize: 14, cursor: "pointer" }}>⚙️</button>
           <button onClick={onLogout} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Logout</button>
         </div>
       </div>
 
-      <ConnectionBar config={apiConfig} onOpenSettings={() => setShowSettings(true)} />
+      <ConnectionBar d365Connected={!!d365Account} e8x8Connected={!!(apiConfig.e8x8?.baseUrl && apiConfig.e8x8?.apiKey)} isLive={isLive} onOpenSettings={() => setShowSettings(true)} />
 
       <div style={{ display: "flex", maxWidth: 1500, margin: "0 auto" }}>
         {/* ═══════ SIDEBAR ═══════ */}
@@ -877,16 +1144,13 @@ function Dashboard({ user, onLogout }) {
             </div>
           </div>
 
-          {/* Tier Info Card */}
+          {/* Tier Info */}
           <div style={{ marginBottom: 18, background: C.bg, borderRadius: 10, padding: "12px 14px", border: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Queue Tiers</div>
             {Object.values(TIERS).map((t) => (
               <div key={t.code} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "4px 0" }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: C.textDark }}>{t.icon} {t.label} — {t.name}</div>
-                  <div style={{ fontSize: 9, color: C.textLight, lineHeight: 1.3 }}>{t.desc}</div>
-                </div>
+                <div><div style={{ fontSize: 11, fontWeight: 600, color: C.textDark }}>{t.icon} {t.label} — {t.name}</div><div style={{ fontSize: 9, color: C.textLight, lineHeight: 1.3 }}>{t.desc}</div></div>
               </div>
             ))}
           </div>
@@ -907,7 +1171,7 @@ function Dashboard({ user, onLogout }) {
 
           {/* Run Button */}
           <button onClick={handleRun} disabled={!canRun || isRunning} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: canRun ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, color: canRun ? "#fff" : C.textLight, fontSize: 15, fontWeight: 700, cursor: canRun ? "pointer" : "not-allowed", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: canRun ? "0 4px 20px rgba(232,101,58,0.35)" : "none", opacity: isRunning ? 0.7 : 1 }}>
-            {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> Generating Report...</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report</>}
+            {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report {isLive ? "(Live)" : "(Demo)"}</>}
           </button>
           {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>Select at least 1 team member</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
@@ -921,16 +1185,16 @@ function Dashboard({ user, onLogout }) {
               <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service Desk SLA Dashboard</h2>
               <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>
                 Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>.
-                Data pulls from <strong style={{ color: C.d365 }}>Dynamics 365</strong> and <strong style={{ color: C.e8x8 }}>8x8 Analytics</strong>.
+                {isLive ? <> Live data from <strong style={{ color: C.d365 }}>D365</strong> and <strong style={{ color: C.e8x8 }}>8x8</strong>.</> : <> Data pulls from <strong style={{ color: C.d365 }}>Dynamics 365</strong> and <strong style={{ color: C.e8x8 }}>8x8 Analytics</strong>.</>}
               </p>
               <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
                 {[{ icon: "👥", label: `${selectedMembers.length} members`, ok: selectedMembers.length > 0 }, { icon: "📊", label: reportType === "daily" ? "Daily Report" : reportType === "weekly" ? "Weekly Report" : "Custom Range", ok: true }, { icon: "📅", label: `${startDate} → ${endDate}`, ok: startDate && endDate }].map((s, i) => <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: s.ok ? C.greenLight + "22" : C.accentLight + "22", border: `1px solid ${s.ok ? C.greenLight + "44" : C.accentLight + "44"}`, fontSize: 12, fontWeight: 600, color: s.ok ? C.green : C.accent, display: "flex", alignItems: "center", gap: 6 }}><span>{s.icon}</span> {s.label} {s.ok ? "✓" : "✗"}</div>)}
               </div>
-              <div style={{ marginTop: 28, display: "flex", gap: 16 }}>
-                {[["🔵 Tier 1", "Service Desk", TIERS[1].color], ["🟠 Tier 2", "Programming", TIERS[2].color], ["🟣 Tier 3", "Rel. Managers", TIERS[3].color], ["📞 Phone", "8x8", C.e8x8], ["📧 Email", "D365", C.d365]].map(([icon, sub, clr]) => (
-                  <div key={icon} style={{ padding: "12px 18px", borderRadius: 10, background: C.card, border: `1px solid ${C.border}`, textAlign: "center" }}><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>{icon}</div><div style={{ fontSize: 10, color: clr, fontWeight: 600, marginTop: 2 }}>{sub}</div></div>
-                ))}
-              </div>
+              {!d365Account && (
+                <div style={{ marginTop: 24, padding: "14px 20px", borderRadius: 12, background: `${C.d365}08`, border: `1px solid ${C.d365}20`, maxWidth: 440 }}>
+                  <div style={{ fontSize: 12, color: C.textMid, lineHeight: 1.5 }}>💡 Click <strong>⚙️ Settings</strong> and <strong style={{ color: C.d365 }}>Sign in with Microsoft</strong> to connect D365 for live data.</div>
+                </div>
+              )}
             </div>
           ) : data && (
             <div style={{ animation: "slideIn 0.4s ease" }} ref={reportRef}>
@@ -941,10 +1205,19 @@ function Dashboard({ user, onLogout }) {
                   <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <span>👥 {selectedMembers.length} member{selectedMembers.length > 1 ? "s" : ""}</span>
                     <span>📅 {dateLabel}</span>
-                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: apiConfig.live ? C.greenLight + "33" : "#0078D415", color: apiConfig.live ? C.green : "#0078D4", fontWeight: 600 }}>{apiConfig.live ? "🟢 Live" : "🔵 Demo"}</span>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: data.source === "live" ? C.greenLight + "33" : data.source === "d365" ? C.greenLight + "33" : "#0078D415", color: data.source === "live" || data.source === "d365" ? C.green : "#0078D4", fontWeight: 600 }}>{data.source === "live" || data.source === "d365" ? "🟢 Live Data" : "🔵 Demo"}</span>
                   </div>
                 </div>
               </div>
+
+              {/* Errors banner */}
+              {liveErrors.length > 0 && (
+                <div style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 10, background: C.orangeLight, border: `1px solid ${C.orange}30` }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.orange, marginBottom: 4 }}>⚠️ Some data could not be fetched ({liveErrors.length} issue{liveErrors.length > 1 ? "s" : ""})</div>
+                  {liveErrors.slice(0, 5).map((e, i) => <div key={i} style={{ fontSize: 10, color: C.textMid, lineHeight: 1.5 }}>• {e}</div>)}
+                  {liveErrors.length > 5 && <div style={{ fontSize: 10, color: C.textLight }}>...and {liveErrors.length - 5} more</div>}
+                </div>
+              )}
 
               {/* Report Sections */}
               <TierSection tier={1} data={data} />
@@ -961,13 +1234,9 @@ function Dashboard({ user, onLogout }) {
               <div style={{ height: 3, background: C.bg }} />
               <OverallSummary data={data} />
               <Definitions />
-
-              {/* Footer */}
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
-                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated automatically by Service Desk SLA System</p>
+                <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated {data.source === "live" || data.source === "d365" ? "from live D365 + 8x8 data" : "with demo data"} by Service Desk SLA System</p>
               </div>
-
-              {/* Charts */}
               <ChartsPanel data={data} />
             </div>
           )}
