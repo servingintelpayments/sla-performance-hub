@@ -409,20 +409,33 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const casesCreatedBy = await safeCount("Cases Created",
     `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
 
-  // Phone call activity from D365 phonecalls entity
-  // directioncode: true = outgoing, false = incoming
-  const incomingCalls = await safeCount("Incoming Calls",
-    `phonecalls?$filter=directioncode eq false and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  const outgoingCalls = await safeCount("Outgoing Calls",
-    `phonecalls?$filter=directioncode eq true and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  // Total phone activities (regardless of direction)
-  const totalPhoneCalls = await safeCount("Total Phone Calls",
-    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  // Voicemails — phone calls with no actual duration or marked as voicemail
-  const voicemails = await safeCount("Voicemails",
-    `phonecalls?$filter=_ownerid_value eq ${oid} and directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  // Answered live = incoming minus voicemails
-  const answeredLive = Math.max(0, incomingCalls - voicemails);
+  // Phone call activity — matches tier-level logic
+  const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes`);
+  const answeredLive = await safeFetchCount("Answered Calls",
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=actualdurationminutes`);
+  const abandonedCalls = await safeFetchCount("Abandoned Calls",
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=actualdurationminutes`);
+  const incomingCalls = totalPhoneCalls;
+  const outgoingCalls = 0;
+  const voicemails = abandonedCalls;
+
+  // Avg Phone AHT per member
+  let memberAHT = "N/A";
+  if (totalPhoneCalls > 0) {
+    try {
+      const ahtData = await d365Fetch(
+        `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes&$top=5000`
+      );
+      if (ahtData.value?.length > 0) {
+        const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes) || 0).filter(n => !isNaN(n));
+        if (durations.length > 0) {
+          const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length / 60);
+          memberAHT = `${avg} min`;
+        }
+      }
+    } catch (err) { errors.push(`${member.name} — AHT: ${err.message}`); }
+  }
 
   // CSAT
   let csatResponses = 0, csatAvg = "N/A";
@@ -473,7 +486,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
     casesCreatedBy,
     fcrCases, fcrRate, escalatedCases, escalationRate,
     emailCases, emailResolved,
-    totalPhoneCalls, incomingCalls, outgoingCalls, answeredLive, voicemails,
+    totalPhoneCalls, incomingCalls, outgoingCalls, answeredLive, voicemails, memberAHT,
     csatResponses, csatAvg,
     avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
     errors,
@@ -1036,20 +1049,13 @@ function MemberSection({ memberData, index }) {
       {/* Phone Activity Section — Tier 1 only */}
       {isTier1 && (
         <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 18 }}>📞</span> Phone Activity
           </div>
-          <PhoneStat icon="📥" label="Total Incoming Calls" value={d.incomingCalls ?? 0} accent={C.blue} />
-          <PhoneStat icon="✅" label="Answered Live" value={d.answeredLive ?? 0} accent="#2D9D78" />
-          <PhoneStat icon="📤" label="Outgoing Calls" value={d.outgoingCalls ?? 0} accent={C.textDark} />
-          <PhoneStat icon="📱" label="Voicemails (VM)" value={d.voicemails ?? 0} accent={C.orange} />
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 16 }}>📊</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>Total Phone Activities</span>
-            </div>
-            <span style={{ fontSize: 22, fontWeight: 800, color: color, fontFamily: "'Space Mono', monospace" }}>{d.totalPhoneCalls ?? 0}</span>
-          </div>
+          <PhoneStat icon="📞" label="Total Calls" value={d.totalPhoneCalls ?? 0} accent={C.textDark} />
+          <PhoneStat icon="✅" label="Answered Calls" value={d.answeredLive ?? 0} accent="#2D9D78" />
+          <PhoneStat icon="❌" label="Abandoned Calls" value={d.voicemails ?? 0} accent="#E5544B" />
+          <PhoneStat icon="⏱️" label="Avg Phone AHT" value={d.memberAHT ?? "N/A"} accent={C.textMid} />
         </div>
       )}
     </div>
