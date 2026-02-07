@@ -625,17 +625,16 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   }
 
   // ── Phone call activity (aggregate for tier 1 — all agents) ──
-  const phoneIncoming = await safeCount("Phone Incoming",
-    `phonecalls?$filter=directioncode eq false and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  const phoneOutgoing = await safeCount("Phone Outgoing",
-    `phonecalls?$filter=directioncode eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  const phoneVoicemails = await safeCount("Phone Voicemails",
-    `phonecalls?$filter=directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
-  const phoneTotal = await safeCount("Phone Total",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const phoneIncoming = await safeFetchCount("Phone Incoming",
+    `phonecalls?$filter=directioncode eq false and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
+  const phoneOutgoing = await safeFetchCount("Phone Outgoing",
+    `phonecalls?$filter=directioncode eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
+  const phoneVoicemails = await safeFetchCount("Phone Voicemails",
+    `phonecalls?$filter=directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
+  const phoneTotal = phoneIncoming + phoneOutgoing;
   // Answered = incoming calls with actual duration (not missed/abandoned)
-  const phoneAnswered = await safeCount("Phone Answered",
-    `phonecalls?$filter=directioncode eq false and actualdurationminutes gt 0 and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const phoneAnswered = await safeFetchCount("Phone Answered",
+    `phonecalls?$filter=directioncode eq false and actualdurationminutes gt 0 and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
   // Abandoned = Total incoming - Answered (matches workflow calculation)
   const phoneAbandoned = Math.max(0, phoneIncoming - phoneAnswered);
   // Answer Rate
