@@ -192,18 +192,66 @@ const C = {
 };
 const PIE_COLORS = [C.accent, "#2D9D78", C.blue, C.yellow, C.purple, C.accentLight, "#A3E4C8"];
 
-/* ─── DEMO TEAM MEMBERS ─── */
+/* ─── DEMO TEAM MEMBERS (fallback) ─── */
 const DEMO_TEAM_MEMBERS = [
-  { id: "rjones", name: "Ryan Jones", role: "Agent I", avatar: "RJ", tier: 1 },
-  { id: "tbrown", name: "Tyler Brown", role: "Agent I", avatar: "TB", tier: 1 },
-  { id: "lnguyen", name: "Lisa Nguyen", role: "Agent I", avatar: "LN", tier: 1 },
-  { id: "agarcia", name: "Ana Garcia", role: "Agent II", avatar: "AG", tier: 2 },
-  { id: "mchen", name: "Michael Chen", role: "Agent II", avatar: "MC", tier: 2 },
-  { id: "spatil", name: "Sanya Patil", role: "Agent II", avatar: "SP", tier: 2 },
-  { id: "jsmith", name: "Jordan Smith", role: "Senior Agent", avatar: "JS", tier: 3 },
-  { id: "kwilson", name: "Keisha Wilson", role: "Senior Agent", avatar: "KW", tier: 3 },
-  { id: "dkim", name: "David Kim", role: "Senior Agent", avatar: "DK", tier: 3 },
+  { id: "demo1", name: "Demo Agent 1", role: "Agent I", avatar: "D1", tier: 1 },
+  { id: "demo2", name: "Demo Agent 2", role: "Agent I", avatar: "D2", tier: 1 },
+  { id: "demo3", name: "Demo Agent 3", role: "Agent II", avatar: "D3", tier: 2 },
 ];
+
+/* ─── FETCH TEAM MEMBERS FROM D365 ─── */
+async function fetchD365TeamMembers() {
+  try {
+    // Fetch active users who handle cases (customer service reps)
+    const data = await d365Fetch(
+      `systemusers?$filter=isdisabled eq false and serviceid ne null or isdisabled eq false and title ne null&$select=systemuserid,fullname,title,internalemailaddress,jobtitle&$orderby=fullname asc&$top=100`
+    );
+    if (!data.value?.length) {
+      // Broader query if first returns nothing
+      const data2 = await d365Fetch(
+        `systemusers?$filter=isdisabled eq false and accessmode ne 3 and accessmode ne 5&$select=systemuserid,fullname,title,internalemailaddress,jobtitle&$orderby=fullname asc&$top=100`
+      );
+      return mapD365Users(data2.value || []);
+    }
+    return mapD365Users(data.value);
+  } catch (err) {
+    console.error("Failed to fetch D365 users:", err);
+    // Try simplest possible query
+    try {
+      const data = await d365Fetch(
+        `systemusers?$filter=isdisabled eq false&$select=systemuserid,fullname,title,internalemailaddress&$orderby=fullname asc&$top=50`
+      );
+      return mapD365Users(data.value || []);
+    } catch {
+      return [];
+    }
+  }
+}
+
+function mapD365Users(users) {
+  return users
+    .filter(u => u.fullname && !u.fullname.includes("SYSTEM") && !u.fullname.includes("Integration"))
+    .map(u => {
+      const name = u.fullname || "Unknown";
+      const parts = name.split(" ");
+      const avatar = parts.length >= 2
+        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+        : name.substring(0, 2).toUpperCase();
+      // Try to guess tier from title/jobtitle
+      const titleLower = (u.title || u.jobtitle || "").toLowerCase();
+      let tier = 1;
+      if (titleLower.includes("senior") || titleLower.includes("manager") || titleLower.includes("relationship") || titleLower.includes("vip")) tier = 3;
+      else if (titleLower.includes("program") || titleLower.includes("developer") || titleLower.includes("engineer") || titleLower.includes("ii") || titleLower.includes("level 2") || titleLower.includes("tier 2")) tier = 2;
+      return {
+        id: u.systemuserid,
+        name,
+        role: u.title || u.jobtitle || "Agent",
+        avatar,
+        tier,
+        email: u.internalemailaddress || "",
+      };
+    });
+}
 
 /* ─── DEMO DATA GENERATOR ─── */
 function rng(seed) { return (n) => { const x = Math.sin(seed + n) * 10000; return x - Math.floor(x); }; }
@@ -299,43 +347,43 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
 
   // ── Tier 1 queries ──
   const t1Cases = await safeCount("Tier 1 Cases",
-    `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t1SLAMet = await safeCount("Tier 1 SLA Met",
-    `incidents?$filter=casetypecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t1FCR = await safeCount("Tier 1 FCR",
-    `incidents?$filter=casetypecode eq 1 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 1 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
-    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   // ── Tier 2 queries ──
   const t2Cases = await safeCount("Tier 2 Cases",
-    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t2Resolved = await safeCount("Tier 2 Resolved",
-    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t2SLAMet = await safeCount("Tier 2 SLA Met",
-    `incidents?$filter=casetypecode eq 2 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 2 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
-    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   // ── Tier 3 queries ──
   const t3Cases = await safeCount("Tier 3 Cases",
-    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t3Resolved = await safeCount("Tier 3 Resolved",
-    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t3SLAMet = await safeCount("Tier 3 SLA Met",
-    `incidents?$filter=casetypecode eq 3 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=casetypecode eq 3 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   // ── Email queries ──
   const emailCases = await safeCount("Email Cases",
-    `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const emailResponded = await safeCount("Email Responded",
-    `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const emailResolved = await safeCount("Email Resolved",
-    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   // ── CSAT queries ──
   const csatResponses = await safeCount("CSAT Responses",
-    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=0`);
+    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   let csatAvg = "N/A";
   if (csatResponses > 0) {
@@ -1006,7 +1054,8 @@ function LoginPage({ onLogin }) {
    MAIN DASHBOARD — SIDEBAR LAYOUT
    ═══════════════════════════════════════════════════════ */
 function Dashboard({ user, onLogout }) {
-  const [teamMembers] = useState(DEMO_TEAM_MEMBERS);
+  const [teamMembers, setTeamMembers] = useState(DEMO_TEAM_MEMBERS);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [reportType, setReportType] = useState("daily");
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split("T")[0]);
@@ -1027,13 +1076,29 @@ function Dashboard({ user, onLogout }) {
       try {
         const msal = getMsal();
         await msal.initialize();
-        // Handle redirect response if any
         await msal.handleRedirectPromise();
         const account = getMsalAccount();
         if (account) setD365Account(account);
       } catch (err) { console.log("MSAL init:", err); }
     })();
   }, []);
+
+  // Fetch team members from D365 when connected
+  useEffect(() => {
+    if (d365Account) {
+      setLoadingMembers(true);
+      fetchD365TeamMembers().then(members => {
+        if (members.length > 0) {
+          setTeamMembers(members);
+          setSelectedMembers([]);
+        }
+        setLoadingMembers(false);
+      }).catch(() => setLoadingMembers(false));
+    } else {
+      setTeamMembers(DEMO_TEAM_MEMBERS);
+      setSelectedMembers([]);
+    }
+  }, [d365Account]);
 
   const canRun = selectedMembers.length > 0;
   const isLive = apiConfig.live && d365Account;
@@ -1126,7 +1191,7 @@ function Dashboard({ user, onLogout }) {
 
           {/* Team Members */}
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members {loadingMembers && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading from D365...</span>}</div>
             <MultiMemberSelect selected={selectedMembers} onChange={setSelectedMembers} members={teamMembers} />
             {selectedMembers.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
               {selectedMembers.slice(0, 4).map((id) => { const m = teamMembers.find((t) => t.id === id); const idx = teamMembers.indexOf(m); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: PIE_COLORS[idx % PIE_COLORS.length] + "18", color: PIE_COLORS[idx % PIE_COLORS.length], fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setSelectedMembers(selectedMembers.filter((s) => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
