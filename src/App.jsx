@@ -203,20 +203,19 @@ const DEMO_TEAM_MEMBERS = [
 async function fetchD365Queues() {
   try {
     const data = await d365Fetch(
-      `queues?$filter=statecode eq 0 and queueviewtype eq 0&$select=queueid,name,description,emailaddress&$orderby=name asc`
+      `queues?$filter=statecode eq 0&$select=queueid,name,description,emailaddress,queueviewtype&$orderby=name asc`
     );
     return (data.value || []).map(q => ({
       id: q.queueid,
-      name: q.name,
+      name: q.name + (q.queueviewtype === 1 ? " 🔒" : ""),
       description: q.description || "",
       email: q.emailaddress || "",
     }));
   } catch (err) {
     console.error("Failed to fetch queues:", err);
-    // Try without queueviewtype filter
     try {
       const data = await d365Fetch(
-        `queues?$filter=statecode eq 0&$select=queueid,name,description,emailaddress&$orderby=name asc&$top=50`
+        `queues?$select=queueid,name,description,emailaddress&$orderby=name asc&$top=50`
       );
       return (data.value || []).map(q => ({
         id: q.queueid,
