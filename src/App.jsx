@@ -451,17 +451,18 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
     }
   } catch (err) { errors.push(`${member.name} — CSAT: ${err.message}`); }
 
-  // Avg resolution time
+  // Avg resolution time (cases created AND resolved in range)
   let avgResTime = "N/A";
   try {
     progress("Resolution time");
     const resolved = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
       if (handleTimes.length > 0) {
-        const avgMin = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
+        const avgRaw = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
+        const avgMin = avgRaw > 1000 ? avgRaw / 60 : avgRaw;
         if (avgMin >= 60) {
           const h = Math.floor(avgMin / 60);
           const m = Math.round(avgMin % 60);
@@ -470,8 +471,11 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
           avgResTime = `${Math.round(avgMin)} min`;
         }
       } else {
-        const times = resolved.value.map(r => (new Date(r.modifiedon) - new Date(r.createdon)) / (1000 * 60 * 60)).filter(h => h > 0 && h < 720);
-        if (times.length > 0) avgResTime = +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1);
+        const times = resolved.value.map(r => (new Date(r.modifiedon) - new Date(r.createdon)) / (1000 * 60 * 60)).filter(h => h >= 0 && h < 168);
+        if (times.length > 0) {
+          const avg = times.reduce((a, b) => a + b, 0) / times.length;
+          avgResTime = avg < 1 ? `${Math.round(avg * 60)} min` : `${avg.toFixed(1)} hrs`;
+        }
       }
     }
   } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
@@ -602,18 +606,20 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   }
 
-  // ── Resolution time (Tier 1 resolved cases only) ──
+  // ── Resolution time (Tier 1 resolved cases only — created AND resolved in range) ──
   let avgResTime = "N/A";
   try {
     progress("Fetching resolution times...");
     const resolved = await d365Fetch(
-      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
+      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
-      // Try cr7fe_new_handletime first (workflow's field), fallback to createdon→modifiedon diff
+      // Try cr7fe_new_handletime first (could be minutes or seconds — try both)
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
       if (handleTimes.length > 0) {
-        const avgMin = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
+        const avgRaw = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
+        // If avg > 1000, likely stored in seconds — convert to minutes
+        const avgMin = avgRaw > 1000 ? avgRaw / 60 : avgRaw;
         if (avgMin >= 60) {
           const h = Math.floor(avgMin / 60);
           const m = Math.round(avgMin % 60);
@@ -622,14 +628,19 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
           avgResTime = `${Math.round(avgMin)} min`;
         }
       } else {
-        // Fallback: diff createdon → modifiedon
+        // Fallback: diff createdon → modifiedon (only cases created in range, so diff is reasonable)
         const times = resolved.value.map(r => {
           const created = new Date(r.createdon);
           const modified = new Date(r.modifiedon);
           return (modified - created) / (1000 * 60 * 60);
-        }).filter(h => h > 0 && h < 720);
+        }).filter(h => h >= 0 && h < 168); // cap at 7 days
         if (times.length > 0) {
-          avgResTime = `${(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1)} hrs`;
+          const avg = times.reduce((a, b) => a + b, 0) / times.length;
+          if (avg < 1) {
+            avgResTime = `${Math.round(avg * 60)} min`;
+          } else {
+            avgResTime = `${avg.toFixed(1)} hrs`;
+          }
         }
       }
     }
@@ -843,7 +854,25 @@ function CTooltip({ active, payload, label }) {
 function MetricCard({ label, value, target, unit, inverse, color }) {
   const numVal = parseFloat(value);
   const numTarget = parseFloat(target);
-  const isNA = value === "N/A" || isNaN(numVal);
+  const isNA = value === "N/A" || (typeof value === "string" && value === "N/A") || (typeof value !== "string" && isNaN(numVal));
+  const noTarget = target === null || target === undefined;
+
+  // Display-only mode (no target comparison, e.g. Avg Resolution Time)
+  if (noTarget) {
+    const displayVal = isNA ? "N/A" : (typeof value === "string" ? value : `${value}${unit || ""}`);
+    return (
+      <div style={{ background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px", position: "relative", overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
+        </div>
+        <div style={{ height: 10, marginBottom: 8 }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
+        </div>
+      </div>
+    );
+  }
+
   let pct = isNA ? 0 : inverse ? Math.min(100, (numTarget / Math.max(numVal, 0.01)) * 100) : Math.min(100, (numVal / Math.max(numTarget, 0.01)) * 100);
   if (unit === " min" || unit === " hrs") pct = isNA ? 0 : numVal <= numTarget ? 100 : Math.max(0, 100 - ((numVal - numTarget) / numTarget) * 100);
   const met = isNA ? null : inverse ? numVal <= numTarget : numVal >= numTarget;
@@ -894,8 +923,12 @@ function TierSection({ tier, data, members }) {
   if (t.metrics.includes("fcr_rate")) metrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" });
   if (t.metrics.includes("escalation_rate")) metrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true });
   if (t.metrics.includes("avg_resolution_time")) {
-    const hrs = parseFloat(d.avgResolutionTime);
-    metrics.push({ label: "Avg Resolution Time", value: isNaN(hrs) ? "N/A" : hrs, target: 6, unit: " hrs" });
+    const raw = d.avgResolutionTime || "N/A";
+    // Already formatted as "Xh Ym", "X min", or "X.X hrs"
+    const num = parseFloat(raw);
+    const isHrs = raw.includes("hrs");
+    const isMin = raw.includes("min") && !raw.includes("h");
+    metrics.push({ label: "Avg Resolution Time", value: isNaN(num) ? "N/A" : raw, target: null, unit: "", rawDisplay: true });
   }
   // Add CSAT if tier 1
   if (tier === 1 && data.csat) {
@@ -1050,12 +1083,12 @@ function MemberSection({ memberData, index }) {
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
-    { label: "Avg Resolution Time", value: parseFloat(d.avgResTime) || "N/A", target: 6, unit: " hrs" },
+    { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
     { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
   ] : [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
-    { label: "Avg Resolution Time", value: parseFloat(d.avgResTime) || "N/A", target: 6, unit: " hrs" },
+    { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
   ];
 
   const PhoneStat = ({ icon, label, value, accent }) => (
