@@ -1394,36 +1394,54 @@ function Dashboard({ user, onLogout }) {
   }, []);
 
   // Fetch queues from D365 when connected — filter to 3 tiers only
-  // Exact queue names to match (order = priority — first match wins per tier)
-  const TIER_EXACT_NAMES = [
-    { names: ["Service Desk Queue", "Service Desk"], tier: 1, label: "Tier 1 — Service Desk" },
-    { names: ["Programming Team"], tier: 2, label: "Tier 2 — Programming Team" },
-    { names: ["Relationship Managers"], tier: 3, label: "Tier 3 — Relationship Managers" },
+  // Match logic: find exact queue per tier, with skip rules for duplicates
+  const TIER_DEFS = [
+    {
+      tier: 1, label: "Tier 1 — Service Desk",
+      match: (name) => {
+        const n = name.toLowerCase();
+        // Must contain "service desk" but NOT angle brackets, NOT "lead shift", NOT "queue" suffix
+        if (!n.includes("service desk")) return false;
+        if (name.includes("<") || name.includes(">")) return false;
+        if (n.includes("lead shift")) return false;
+        if (n.includes("queue") && n !== "service desk queue") return false;
+        // Prefer exact "Service Desk"
+        return true;
+      },
+      // If multiple match, prefer the shortest/simplest name
+      prefer: (a, b) => a.name.replace(" 🔒", "").trim().length - b.name.replace(" 🔒", "").trim().length,
+    },
+    {
+      tier: 2, label: "Tier 2 — Programming Team",
+      match: (name) => name.toLowerCase().includes("programming team"),
+    },
+    {
+      tier: 3, label: "Tier 3 — Relationship Managers",
+      match: (name) => name.toLowerCase().includes("relationship manager"),
+    },
   ];
 
   useEffect(() => {
     if (d365Account) {
       setLoadingQueues(true);
       fetchD365Queues().then(q => {
-        // Match exactly one queue per tier
         const filtered = [];
-        for (const tierDef of TIER_EXACT_NAMES) {
-          let matched = null;
-          for (const exactName of tierDef.names) {
-            matched = q.find(queue => {
-              const cleanName = queue.name.replace(" 🔒", "").trim();
-              return cleanName.toLowerCase() === exactName.toLowerCase();
-            });
-            if (matched) break;
+        for (const tierDef of TIER_DEFS) {
+          const cleanQ = q.map(queue => ({ ...queue, cleanName: queue.name.replace(" 🔒", "").trim() }));
+          let matches = cleanQ.filter(queue => tierDef.match(queue.cleanName));
+          // If prefer function exists and multiple matches, sort and take first
+          if (matches.length > 1 && tierDef.prefer) {
+            matches.sort(tierDef.prefer);
           }
-          if (matched) {
+          if (matches.length > 0) {
             filtered.push({
-              ...matched,
+              ...matches[0],
               tierLabel: tierDef.label,
               tierNum: tierDef.tier,
             });
           }
         }
+        console.log("Tier queues matched:", filtered.map(f => `${f.tierLabel} → "${f.name}" (${f.id})`));
         setQueues(filtered);
         setLoadingQueues(false);
       }).catch(() => setLoadingQueues(false));
