@@ -376,15 +376,20 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
     catch (err) { errors.push(`${member.name} — ${label}: ${err.message}`); return 0; }
   }
 
+  async function safeFetchCount(label, query) {
+    try { progress(label); const data = await d365Fetch(query); return data["@odata.count"] ?? data.value?.length ?? 0; }
+    catch (err) { errors.push(`${member.name} — ${label}: ${err.message}`); return 0; }
+  }
+
   // Cases owned by this member
   const totalCases = await safeCount("Total Cases",
     `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const resolvedCases = await safeCount("Resolved",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const slaMet = await safeCount("SLA Met",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const fcrCases = await safeCount("FCR",
-    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const resolvedCases = await safeFetchCount("Resolved",
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+  const slaMet = await safeFetchCount("SLA Met",
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+  const fcrCases = await safeFetchCount("FCR",
+    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
   const escalatedCases = await safeCount("Escalated",
     `incidents?$filter=_ownerid_value eq ${oid} and isescalated eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const activeCases = await safeCount("Active",
@@ -393,8 +398,8 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   // Email cases
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const emailResolved = await safeCount("Email Resolved",
-    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const emailResolved = await safeFetchCount("Email Resolved",
+    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
   // Cases created BY this member (vs owned/assigned)
   const casesCreatedBy = await safeCount("Cases Created",
@@ -502,41 +507,61 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   }
 
+  // Helper to fetch records and count them (like Power Automate "List rows" + length())
+  // More reliable than $count=true for statecode/custom field filters
+  async function safeFetchCount(label, query) {
+    try {
+      progress(`Fetching ${label}...`);
+      const data = await d365Fetch(query);
+      return data["@odata.count"] ?? data.value?.length ?? 0;
+    } catch (err) {
+      errors.push(`${label}: ${err.message}`);
+      return 0;
+    }
+  }
+
   // ── Tier 1 queries ──
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const t1SLAMet = await safeCount("Tier 1 SLA Met",
-    `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const t1FCR = await safeCount("Tier 1 FCR",
-    `incidents?$filter=cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
+
+  // SLA Met: fetch actual records (matches workflow's Get_SLA_Met_Cases "List rows")
+  // Workflow filter: statecode eq 1 and modifiedon ge/le (selects incidentid,cr7fe_new_handletime)
+  const t1SLAMet = await safeFetchCount("SLA Met Cases",
+    `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+
+  // FCR: fetch actual records (matches workflow's Get_FCR_Cases "List rows")
+  // Workflow filter: cr7fe_new_fcr eq true and modifiedon ge/le
+  const t1FCR = await safeFetchCount("FCR Cases",
+    `incidents?$filter=cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+
   const t1Escalated = await safeCount("Tier 1 Escalated",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   // ── Tier 2 queries ──
   const t2Cases = await safeCount("Tier 2 Cases",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const t2Resolved = await safeCount("Tier 2 Resolved",
-    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const t2SLAMet = await safeCount("Tier 2 SLA Met",
-    `incidents?$filter=casetypecode eq 2 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const t2Resolved = await safeFetchCount("Tier 2 Resolved",
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+  const t2SLAMet = await safeFetchCount("Tier 2 SLA Met",
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
   // ── Tier 3 queries ──
   const t3Cases = await safeCount("Tier 3 Cases",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const t3Resolved = await safeCount("Tier 3 Resolved",
-    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const t3SLAMet = await safeCount("Tier 3 SLA Met",
-    `incidents?$filter=casetypecode eq 3 and resolvebyslastatus eq 4 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const t3Resolved = await safeFetchCount("Tier 3 Resolved",
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+  const t3SLAMet = await safeFetchCount("Tier 3 SLA Met",
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
   // ── Email queries ──
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const emailResponded = await safeCount("Email Responded",
     `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
-  const emailResolved = await safeCount("Email Resolved",
-    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+  const emailResolved = await safeFetchCount("Email Resolved",
+    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
   // ── CSAT queries ──
   const csatResponses = await safeCount("CSAT Responses",
