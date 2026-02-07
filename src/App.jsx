@@ -411,6 +411,25 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const emailResolved = await safeCount("Email Resolved",
     `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
 
+  // Cases created BY this member (vs owned/assigned)
+  const casesCreatedBy = await safeCount("Cases Created",
+    `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+
+  // Phone call activity from D365 phonecalls entity
+  // directioncode: true = outgoing, false = incoming
+  const incomingCalls = await safeCount("Incoming Calls",
+    `phonecalls?$filter=_regardingobjectid_value ne null and directioncode eq false and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  const outgoingCalls = await safeCount("Outgoing Calls",
+    `phonecalls?$filter=directioncode eq true and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  // Total phone activities (regardless of direction)
+  const totalPhoneCalls = await safeCount("Total Phone Calls",
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  // Voicemails — phone calls with no actual duration or marked as voicemail
+  const voicemails = await safeCount("Voicemails",
+    `phonecalls?$filter=_ownerid_value eq ${oid} and directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+  // Answered live = incoming minus voicemails
+  const answeredLive = Math.max(0, incomingCalls - voicemails);
+
   // CSAT
   let csatResponses = 0, csatAvg = "N/A";
   try {
@@ -446,8 +465,10 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   return {
     member,
     totalCases, resolvedCases, activeCases, slaMet, slaCompliance,
+    casesCreatedBy,
     fcrCases, fcrRate, escalatedCases, escalationRate,
     emailCases, emailResolved, emailSla,
+    totalPhoneCalls, incomingCalls, outgoingCalls, answeredLive, voicemails,
     csatResponses, csatAvg,
     avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
     errors,
@@ -864,7 +885,7 @@ function TierSection({ tier, data, members }) {
       </div>
 
       {/* Metric Cards Grid */}
-      <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>{t.label} Queue SLA Status — All Metrics</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>{t.label} SLA Status — All Metrics</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {metrics.map((m, i) => (
           <MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />
@@ -941,6 +962,16 @@ function MemberSection({ memberData, index }) {
     { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
   ];
 
+  const PhoneStat = ({ icon, label, value, accent }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <span style={{ fontSize: 13, color: C.textMid }}>{label}</span>
+      </div>
+      <span style={{ fontSize: 18, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
+    </div>
+  );
+
   return (
     <div style={{ marginBottom: 24 }}>
       {/* Member Header */}
@@ -955,20 +986,38 @@ function MemberSection({ memberData, index }) {
       </div>
 
       {/* Summary Stats */}
-      <div style={{ display: "flex", gap: 10, padding: "16px 0" }}>
-        <StatCard label="SLA Rate" value={d.slaCompliance === "N/A" ? "N/A" : `${d.slaCompliance}%`} color={d.slaCompliance !== "N/A" && d.slaCompliance >= 90 ? "#2D9D78" : "#E5544B"} />
-        <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color="#2D9D78" />
-        <StatCard label="SLAs Missed" value={`${slaMissed}/${d.totalCases}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
-        <StatCard label="Total Cases" value={d.totalCases} color={color} />
+      <div style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
+        <StatCard label="Cases Owned" value={d.totalCases} color={color} />
+        <StatCard label="Cases Created" value={d.casesCreatedBy ?? "—"} color={C.blue} />
+        <StatCard label="Resolved" value={d.resolvedCases} color="#2D9D78" />
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
+        <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
 
-      {/* Metric Cards */}
+      {/* Performance Metric Cards */}
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {metrics.map((mt, i) => (
           <MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />
         ))}
+      </div>
+
+      {/* Phone Activity Section */}
+      <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 18 }}>📞</span> Phone Activity
+        </div>
+        <PhoneStat icon="📥" label="Total Incoming Calls" value={d.incomingCalls ?? 0} accent={C.blue} />
+        <PhoneStat icon="✅" label="Answered Live" value={d.answeredLive ?? 0} accent="#2D9D78" />
+        <PhoneStat icon="📤" label="Outgoing Calls" value={d.outgoingCalls ?? 0} accent={C.textDark} />
+        <PhoneStat icon="📱" label="Voicemails (VM)" value={d.voicemails ?? 0} accent={C.orange} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📊</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>Total Phone Activities</span>
+          </div>
+          <span style={{ fontSize: 22, fontWeight: 800, color: color, fontFamily: "'Space Mono', monospace" }}>{d.totalPhoneCalls ?? 0}</span>
+        </div>
       </div>
     </div>
   );
@@ -1344,12 +1393,34 @@ function Dashboard({ user, onLogout }) {
     })();
   }, []);
 
-  // Fetch queues from D365 when connected
+  // Fetch queues from D365 when connected — filter to 3 tiers only
+  const TIER_QUEUE_MAP = {
+    "Service Desk": { tier: 1, label: "Tier 1 — Service Desk" },
+    "<Service Desk>": { tier: 1, label: "Tier 1 — Service Desk" },
+    "Service Desk Queue": { tier: 1, label: "Tier 1 — Service Desk" },
+    "Programming Team": { tier: 2, label: "Tier 2 — Programming Team" },
+    "Relationship Managers": { tier: 3, label: "Tier 3 — Relationship Managers" },
+  };
+  const TIER_QUEUE_KEYWORDS = ["service desk", "programming team", "relationship manager"];
+
   useEffect(() => {
     if (d365Account) {
       setLoadingQueues(true);
       fetchD365Queues().then(q => {
-        setQueues(q);
+        // Filter to only the 3 tier queues
+        const filtered = q.filter(queue => {
+          const cleanName = queue.name.replace(" 🔒", "").trim();
+          return TIER_QUEUE_KEYWORDS.some(kw => cleanName.toLowerCase().includes(kw));
+        }).map(queue => {
+          const cleanName = queue.name.replace(" 🔒", "").trim();
+          const mapping = Object.entries(TIER_QUEUE_MAP).find(([key]) => cleanName.toLowerCase().includes(key.toLowerCase()));
+          return {
+            ...queue,
+            tierLabel: mapping ? mapping[1].label : queue.name,
+            tierNum: mapping ? mapping[1].tier : 0,
+          };
+        }).sort((a, b) => a.tierNum - b.tierNum);
+        setQueues(filtered);
         setLoadingQueues(false);
       }).catch(() => setLoadingQueues(false));
     } else {
@@ -1453,12 +1524,19 @@ function Dashboard({ user, onLogout }) {
             const csatR = Math.round(r(8) * 4);
             const csatA = csatR > 0 ? +(3 + r(9) * 1.8).toFixed(1) : "N/A";
             const resTime = +(1 + r(10) * 7).toFixed(1);
+            const incoming = Math.round(2 + r(11) * 8);
+            const vm = Math.round(r(12) * 2);
+            const answered = Math.max(0, incoming - vm);
+            const outgoing = Math.round(r(13) * 4);
+            const created = Math.round(total * (0.5 + r(14) * 0.4));
             return {
               member, totalCases: total, resolvedCases: resolved, activeCases: active,
               slaMet, slaCompliance: total ? Math.round(slaMet / total * 100) : "N/A",
+              casesCreatedBy: created,
               fcrCases: fcr, fcrRate: total ? Math.round(fcr / total * 100) : "N/A",
               escalatedCases: esc, escalationRate: total ? Math.round(esc / total * 100) : "N/A",
               emailCases: emailC, emailResolved: emailR, emailSla: emailC ? Math.round(emailR / emailC * 100) : "N/A",
+              totalPhoneCalls: incoming + outgoing, incomingCalls: incoming, outgoingCalls: outgoing, answeredLive: answered, voicemails: vm,
               csatResponses: csatR, csatAvg: csatA,
               avgResTime: `${resTime} hrs`, errors: [],
             };
@@ -1534,11 +1612,11 @@ function Dashboard({ user, onLogout }) {
         <div className="no-print" style={{ width: 310, minWidth: 310, background: C.card, borderRight: `1px solid ${C.border}`, padding: "24px 20px", minHeight: "calc(100vh - 110px)", display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>Configure Report</div>
 
-          {/* Queue Selector (when D365 connected) */}
+          {/* Tier Selector (when D365 connected) */}
           {d365Account && (
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <span>📋</span> Queue
+                <span>🏢</span> Tier
                 {loadingQueues && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading...</span>}
               </div>
               <select
@@ -1546,9 +1624,9 @@ function Dashboard({ user, onLogout }) {
                 onChange={(e) => setSelectedQueue(e.target.value || null)}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", cursor: "pointer", appearance: "auto" }}
               >
-                <option value="">Select a queue...</option>
+                <option value="">Select a tier...</option>
                 {queues.map(q => (
-                  <option key={q.id} value={q.id}>{q.name}</option>
+                  <option key={q.id} value={q.id}>{q.tierLabel || q.name}</option>
                 ))}
               </select>
               {selectedQueue && (
@@ -1564,7 +1642,7 @@ function Dashboard({ user, onLogout }) {
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members {loadingMembers && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading from D365...</span>}</div>
             <MultiMemberSelect selected={selectedMembers} onChange={setSelectedMembers} members={teamMembers} />
             {d365Account && selectedQueue && !loadingMembers && teamMembers.length === 0 && (
-              <div style={{ marginTop: 6, fontSize: 11, color: C.blue, padding: "8px 10px", background: C.blueLight, borderRadius: 8 }}>No individual members found — you can still run the report using the queue's case data.</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: C.blue, padding: "8px 10px", background: C.blueLight, borderRadius: 8 }}>No individual members found — you can still run the report using the tier's case data.</div>
             )}
             {selectedMembers.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
               {selectedMembers.slice(0, 4).map((id) => { const m = teamMembers.find((t) => t.id === id); const idx = teamMembers.indexOf(m); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: PIE_COLORS[idx % PIE_COLORS.length] + "18", color: PIE_COLORS[idx % PIE_COLORS.length], fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setSelectedMembers(selectedMembers.filter((s) => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
@@ -1611,7 +1689,7 @@ function Dashboard({ user, onLogout }) {
           <button onClick={handleRun} disabled={!canRun || isRunning} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: canRun ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, color: canRun ? "#fff" : C.textLight, fontSize: 15, fontWeight: 700, cursor: canRun ? "pointer" : "not-allowed", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: canRun ? "0 4px 20px rgba(232,101,58,0.35)" : "none", opacity: isRunning ? 0.7 : 1 }}>
             {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report {isLive ? "(Live)" : "(Demo)"}</>}
           </button>
-          {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a queue to run report" : "Select at least 1 team member"}</div>}
+          {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a tier to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
         </div>
 
@@ -1641,8 +1719,8 @@ function Dashboard({ user, onLogout }) {
                 <div>
                   <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Service Desk Report`}</h2>
                   <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    {selectedQueue && <span>📋 {queues.find(q => q.id === selectedQueue)?.name?.replace(" 🔒", "") || "Queue"}</span>}
-                    <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All queue members"}</span>
+                    {selectedQueue && <span>🏢 {queues.find(q => q.id === selectedQueue)?.tierLabel?.replace(" 🔒", "") || "Tier"}</span>}
+                    <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All tier members"}</span>
                     <span>📅 {dateLabel}</span>
                     <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: data.source === "live" ? C.greenLight + "33" : data.source === "d365" ? C.greenLight + "33" : "#0078D415", color: data.source === "live" || data.source === "d365" ? C.green : "#0078D4", fontWeight: 600 }}>{data.source === "live" || data.source === "d365" ? "🟢 Live Data" : "🔵 Demo"}</span>
                   </div>
