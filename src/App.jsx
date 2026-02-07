@@ -380,11 +380,11 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const totalCases = await safeCount("Total Cases",
     `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const resolvedCases = await safeCount("Resolved",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const slaMet = await safeCount("SLA Met",
-    `incidents?$filter=_ownerid_value eq ${oid} and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const fcrCases = await safeCount("FCR",
-    `incidents?$filter=_ownerid_value eq ${oid} and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const escalatedCases = await safeCount("Escalated",
     `incidents?$filter=_ownerid_value eq ${oid} and isescalated eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const activeCases = await safeCount("Active",
@@ -403,7 +403,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   // Phone call activity from D365 phonecalls entity
   // directioncode: true = outgoing, false = incoming
   const incomingCalls = await safeCount("Incoming Calls",
-    `phonecalls?$filter=_regardingobjectid_value ne null and directioncode eq false and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
+    `phonecalls?$filter=directioncode eq false and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
   const outgoingCalls = await safeCount("Outgoing Calls",
     `phonecalls?$filter=directioncode eq true and _ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$count=true&$top=1`);
   // Total phone activities (regardless of direction)
@@ -434,11 +434,23 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   try {
     progress("Resolution time");
     const resolved = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=createdon,modifiedon&$top=50&$orderby=modifiedon desc`
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
-      const times = resolved.value.map(r => (new Date(r.modifiedon) - new Date(r.createdon)) / (1000 * 60 * 60)).filter(h => h > 0 && h < 720);
-      if (times.length > 0) avgResTime = +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1);
+      const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
+      if (handleTimes.length > 0) {
+        const avgMin = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
+        if (avgMin >= 60) {
+          const h = Math.floor(avgMin / 60);
+          const m = Math.round(avgMin % 60);
+          avgResTime = `${h}h ${m}m`;
+        } else {
+          avgResTime = `${Math.round(avgMin)} min`;
+        }
+      } else {
+        const times = resolved.value.map(r => (new Date(r.modifiedon) - new Date(r.createdon)) / (1000 * 60 * 60)).filter(h => h > 0 && h < 720);
+        if (times.length > 0) avgResTime = +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1);
+      }
     }
   } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
 
@@ -494,9 +506,9 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t1SLAMet = await safeCount("Tier 1 SLA Met",
-    `incidents?$filter=casetypecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t1FCR = await safeCount("Tier 1 FCR",
-    `incidents?$filter=casetypecode eq 1 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
@@ -548,21 +560,35 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   }
 
-  // ── Resolution time (sample) ──
+  // ── Resolution time (sample — resolved cases by modifiedon, uses cr7fe_new_handletime) ──
   let avgResTime = "N/A";
   try {
     progress("Fetching resolution times...");
     const resolved = await d365Fetch(
-      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=createdon,modifiedon&$top=100&$orderby=modifiedon desc`
+      `incidents?$filter=statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=100&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
-      const times = resolved.value.map(r => {
-        const created = new Date(r.createdon);
-        const modified = new Date(r.modifiedon);
-        return (modified - created) / (1000 * 60 * 60); // hours
-      }).filter(h => h > 0 && h < 720); // filter out unreasonable values
-      if (times.length > 0) {
-        avgResTime = `${(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1)} hrs`;
+      // Try cr7fe_new_handletime first (workflow's field), fallback to createdon→modifiedon diff
+      const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
+      if (handleTimes.length > 0) {
+        const avgMin = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
+        if (avgMin >= 60) {
+          const h = Math.floor(avgMin / 60);
+          const m = Math.round(avgMin % 60);
+          avgResTime = `${h}h ${m}m`;
+        } else {
+          avgResTime = `${Math.round(avgMin)} min`;
+        }
+      } else {
+        // Fallback: diff createdon → modifiedon
+        const times = resolved.value.map(r => {
+          const created = new Date(r.createdon);
+          const modified = new Date(r.modifiedon);
+          return (modified - created) / (1000 * 60 * 60);
+        }).filter(h => h > 0 && h < 720);
+        if (times.length > 0) {
+          avgResTime = `${(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1)} hrs`;
+        }
       }
     }
   } catch (err) {
@@ -581,7 +607,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const phoneAnswered = Math.max(0, phoneIncoming - phoneVoicemails);
 
   const allCases = t1Cases + t2Cases + t3Cases;
-  const allResolved = t2Resolved + t3Resolved + t1SLAMet;
+  const allResolved = t1SLAMet; // t1SLAMet = statecode eq 1 by modifiedon = all resolved cases (matches workflow's Get Resolved Cases)
 
   return {
     tier1: {
