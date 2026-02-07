@@ -1363,13 +1363,17 @@ function Dashboard({ user, onLogout }) {
 
   // Fetch queue members when a queue is selected
   useEffect(() => {
-    if (selectedQueue && d365Account) {
+    if (selectedQueue && selectedQueue !== "all" && d365Account) {
       setLoadingMembers(true);
       setSelectedMembers([]);
       fetchD365QueueMembers(selectedQueue).then(members => {
         setTeamMembers(members.length > 0 ? members : []);
         setLoadingMembers(false);
       }).catch(() => { setTeamMembers([]); setLoadingMembers(false); });
+    } else if (selectedQueue === "all" && d365Account) {
+      // For "all tiers", clear member selection — tier report only
+      setSelectedMembers([]);
+      setTeamMembers([]);
     } else if (!d365Account) {
       setTeamMembers(DEMO_TEAM_MEMBERS);
     }
@@ -1555,6 +1559,7 @@ function Dashboard({ user, onLogout }) {
                 style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", cursor: "pointer", appearance: "auto" }}
               >
                 <option value="">Select a tier...</option>
+                <option value="all">All Tiers</option>
                 {queues.map(q => (
                   <option key={q.id} value={q.id}>{q.tierLabel || q.name}</option>
                 ))}
@@ -1571,7 +1576,7 @@ function Dashboard({ user, onLogout }) {
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members {loadingMembers && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading from D365...</span>}</div>
             <MultiMemberSelect selected={selectedMembers} onChange={setSelectedMembers} members={teamMembers} />
-            {d365Account && selectedQueue && !loadingMembers && teamMembers.length === 0 && (
+            {d365Account && selectedQueue && selectedQueue !== "all" && !loadingMembers && teamMembers.length === 0 && (
               <div style={{ marginTop: 6, fontSize: 11, color: C.blue, padding: "8px 10px", background: C.blueLight, borderRadius: 8 }}>No individual members found — you can still run the report using the tier's case data.</div>
             )}
             {selectedMembers.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -1649,7 +1654,7 @@ function Dashboard({ user, onLogout }) {
                 <div>
                   <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Operations Report`}</h2>
                   <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    {selectedQueue && <span>🏢 {queues.find(q => q.id === selectedQueue)?.tierLabel?.replace(" 🔒", "") || "Tier"}</span>}
+                    {selectedQueue && <span>🏢 {selectedQueue === "all" ? "All Tiers" : (queues.find(q => q.id === selectedQueue)?.tierLabel?.replace(" 🔒", "") || "Tier")}</span>}
                     <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All tier members"}</span>
                     <span>📅 {dateLabel}</span>
                     <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: data.source === "live" ? C.greenLight + "33" : data.source === "d365" ? C.greenLight + "33" : "#0078D415", color: data.source === "live" || data.source === "d365" ? C.green : "#0078D4", fontWeight: 600 }}>{data.source === "live" || data.source === "d365" ? "🟢 Live Data" : "🔵 Demo"}</span>
@@ -1679,8 +1684,11 @@ function Dashboard({ user, onLogout }) {
                 </>
               ) : (
                 <>
-                  {/* Show only the selected tier */}
+                  {/* Show only the selected tier, or all tiers */}
                   {(() => {
+                    if (selectedQueue === "all") {
+                      return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />);
+                    }
                     const selectedTierNum = queues.find(q => q.id === selectedQueue)?.tierNum;
                     if (selectedTierNum) {
                       return <TierSection tier={selectedTierNum} data={data} members={teamMembers} />;
