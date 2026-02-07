@@ -666,6 +666,58 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   } catch (err) { errors.push(`Phone AHT: ${err.message}`); }
 
+  // ── Build timeline for charts (multi-day ranges) ──
+  let timelineData = [];
+  try {
+    const startD = new Date(s); const endD = new Date(e);
+    const dayCount = Math.round((endD - startD) / (1000 * 60 * 60 * 24)) + 1;
+    if (dayCount >= 2 && dayCount <= 90) {
+      progress("Building timeline...");
+      const [t1Raw, t2Raw, t3Raw, phoneRaw, csatRaw, slaRaw] = await Promise.all([
+        d365Fetch(`incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=createdon&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=escalatedon&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=escalatedon&$top=5000`),
+        d365Fetch(`phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualstart&$top=5000`),
+        d365Fetch(`incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=modifiedon,cr7fe_new_csatscore&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=modifiedon&$top=5000`),
+      ]);
+      const bucket = (records, dateField) => {
+        const map = {};
+        (records.value || []).forEach(r => { const d = (r[dateField] || "").slice(0, 10); map[d] = (map[d] || 0) + 1; });
+        return map;
+      };
+      const bucketAvg = (records, dateField, valField) => {
+        const map = {};
+        (records.value || []).forEach(r => {
+          const d = (r[dateField] || "").slice(0, 10);
+          const v = parseFloat(r[valField]);
+          if (!isNaN(v)) { if (!map[d]) map[d] = []; map[d].push(v); }
+        });
+        const avg = {};
+        Object.keys(map).forEach(d => { avg[d] = +(map[d].reduce((a, b) => a + b, 0) / map[d].length).toFixed(1); });
+        return avg;
+      };
+      const t1Map = bucket(t1Raw, "createdon");
+      const t2Map = bucket(t2Raw, "escalatedon");
+      const t3Map = bucket(t3Raw, "escalatedon");
+      const phoneMap = bucket(phoneRaw, "actualstart");
+      const csatMap = bucketAvg(csatRaw, "modifiedon", "cr7fe_new_csatscore");
+      const slaMap = bucket(slaRaw, "modifiedon");
+      for (let i = 0; i < dayCount; i++) {
+        const d = new Date(startD); d.setDate(d.getDate() + i);
+        const key = d.toISOString().slice(0, 10);
+        const label = `${d.getMonth() + 1}/${d.getDate()}`;
+        const t1 = t1Map[key] || 0;
+        const slaDay = slaMap[key] || 0;
+        timelineData.push({
+          date: label, t1Cases: t1, t2Cases: t2Map[key] || 0, t3Cases: t3Map[key] || 0,
+          sla: t1 > 0 ? Math.round(slaDay / t1 * 100) : 0,
+          calls: phoneMap[key] || 0, csat: csatMap[key] || 0,
+        });
+      }
+    }
+  } catch (err) { errors.push(`Timeline: ${err.message}`); }
+
   const allCases = t1Cases + t2Cases + t3Cases;
   const allResolved = t1SLAMet + t2Resolved + t3Resolved;
 
@@ -695,7 +747,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     csat: { responses: csatResponses, avgScore: csatAvg },
     phone: { totalCalls: phoneTotal, incoming: phoneTotal, outgoing: 0, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: 0, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
     overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: phoneAnswered, abandonedCalls: phoneAbandoned },
-    timeline: [],
+    timeline: timelineData,
     source: "d365",
     errors,
   };
