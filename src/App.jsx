@@ -377,7 +377,12 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   }
 
   async function safeFetchCount(label, query) {
-    try { progress(label); const data = await d365Fetch(query); return data["@odata.count"] ?? data.value?.length ?? 0; }
+    try { 
+      progress(label); 
+      const cleanQuery = query.replace(/&?\$count=true/g, '').replace(/&?\$top=\d+/g, '');
+      const data = await d365Fetch(`${cleanQuery}&$top=5000`); 
+      return data.value?.length ?? 0; 
+    }
     catch (err) { errors.push(`${member.name} — ${label}: ${err.message}`); return 0; }
   }
 
@@ -508,14 +513,19 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   }
 
   // Helper to fetch records and count them (like Power Automate "List rows" + length())
-  // More reliable than $count=true for statecode/custom field filters
+  // Uses $top=5000 to get all records, counts value.length — avoids $count issues
   async function safeFetchCount(label, query) {
     try {
       progress(`Fetching ${label}...`);
-      const data = await d365Fetch(query);
-      return data["@odata.count"] ?? data.value?.length ?? 0;
+      // Remove any existing $count and add $top=5000 for reliable counting
+      const cleanQuery = query.replace(/&?\$count=true/g, '').replace(/&?\$top=\d+/g, '');
+      const data = await d365Fetch(`${cleanQuery}&$top=5000`);
+      const count = data.value?.length ?? 0;
+      console.log(`[D365 Count] ${label}: ${count} records`);
+      return count;
     } catch (err) {
       errors.push(`${label}: ${err.message}`);
+      console.error(`[D365 Count] ${label} ERROR:`, err.message);
       return 0;
     }
   }
