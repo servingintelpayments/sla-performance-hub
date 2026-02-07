@@ -637,15 +637,15 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   // Answer Rate
   const phoneAnswerRate = phoneTotal > 0 ? Math.round(phoneAnswered / phoneTotal * 100) : 0;
 
-  // Avg Phone AHT from actualdurationminutes of answered calls (exclude outliers > 60 min)
+  // Avg Phone AHT - average actualdurationminutes across ALL calls (matches flow)
   let phoneAHT = "N/A";
   try {
     progress("Fetching Phone AHT...");
     const ahtData = await d365Fetch(
-      `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0 and actualdurationminutes le 60&$select=actualdurationminutes&$top=5000`
+      `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes&$top=5000`
     );
     if (ahtData.value?.length > 0) {
-      const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes)).filter(n => !isNaN(n) && n > 0);
+      const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes) || 0).filter(n => !isNaN(n));
       if (durations.length > 0) {
         const avg = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
         phoneAHT = `${avg} min`;
