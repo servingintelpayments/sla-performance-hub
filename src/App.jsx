@@ -624,28 +624,25 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     errors.push(`Resolution time: ${err.message}`);
   }
 
-  // ── Phone call activity (aggregate for tier 1 — all agents) ──
-  const phoneIncoming = await safeFetchCount("Phone Incoming",
-    `phonecalls?$filter=directioncode eq false and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
-  const phoneOutgoing = await safeFetchCount("Phone Outgoing",
-    `phonecalls?$filter=directioncode eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
-  const phoneVoicemails = await safeFetchCount("Phone Voicemails",
-    `phonecalls?$filter=directioncode eq false and leftvoicemail eq true and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
-  const phoneTotal = phoneIncoming + phoneOutgoing;
-  // Answered = incoming calls with actual duration (not missed/abandoned)
+  // ── Phone call activity (matches flow exactly) ──
+  // Get Phone Calls - ALL calls (no directioncode filter)
+  const phoneTotal = await safeFetchCount("Phone Total",
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
+  // Get Answered Calls - actualdurationminutes gt 0
   const phoneAnswered = await safeFetchCount("Phone Answered",
-    `phonecalls?$filter=directioncode eq false and actualdurationminutes gt 0 and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=activityid&$count=true`);
-  // Abandoned = Total incoming - Answered (matches workflow calculation)
-  const phoneAbandoned = Math.max(0, phoneIncoming - phoneAnswered);
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=activityid&$count=true`);
+  // Get Abandoned Calls - actualdurationminutes eq 0
+  const phoneAbandoned = await safeFetchCount("Phone Abandoned",
+    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=activityid&$count=true`);
   // Answer Rate
-  const phoneAnswerRate = phoneIncoming > 0 ? Math.round(phoneAnswered / phoneIncoming * 100) : 0;
+  const phoneAnswerRate = phoneTotal > 0 ? Math.round(phoneAnswered / phoneTotal * 100) : 0;
 
-  // Avg Phone AHT from actualdurationminutes
+  // Avg Phone AHT from actualdurationminutes of answered calls
   let phoneAHT = "N/A";
   try {
     progress("Fetching Phone AHT...");
     const ahtData = await d365Fetch(
-      `phonecalls?$filter=directioncode eq false and actualdurationminutes gt 0 and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes&$top=5000`
+      `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=actualdurationminutes&$top=5000`
     );
     if (ahtData.value?.length > 0) {
       const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes)).filter(n => !isNaN(n) && n > 0);
@@ -683,7 +680,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
       slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A"),
     },
     csat: { responses: csatResponses, avgScore: csatAvg },
-    phone: { totalCalls: phoneTotal, incoming: phoneIncoming, outgoing: phoneOutgoing, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: phoneVoicemails, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
+    phone: { totalCalls: phoneTotal, incoming: phoneTotal, outgoing: 0, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: 0, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
     overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: phoneAnswered, abandonedCalls: phoneAbandoned },
     timeline: [],
     source: "d365",
