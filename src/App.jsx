@@ -398,20 +398,20 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
 
   const casesCreatedBy = await safeFetchCount("Cases Created",
-    `incidents?$filter=(_createdby_value eq ${oid} or _createdonbehalfof_value eq ${oid}) and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
+    `incidents?$filter=(_createdby_value eq ${oid} or _createdonbehalfby_value eq ${oid}) and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
   // DEBUG: capture raw case data
   let debugInfo = "";
   try {
     const debugData = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,_createdby_value,_createdonbehalfof_value,_ownerid_value,createdon&$top=50`
+      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,_createdby_value,_createdonbehalfby_value,_ownerid_value,createdon&$top=50`
     );
     const cases = debugData.value || [];
     debugInfo = `DEBUG: ${cases.length} owned cases | OID: ${oid}\n`;
     cases.forEach((c, i) => {
-      debugInfo += `#${i+1} "${c.title}" createdby=${c._createdby_value} onbehalf=${c._createdonbehalfof_value}\n`;
+      debugInfo += `#${i+1} "${c.title}" createdby=${c._createdby_value} onbehalf=${c._createdonbehalfby_value}\n`;
     });
-    debugInfo += `createdby match: ${cases.filter(c => c._createdby_value === oid).length} | onbehalf match: ${cases.filter(c => c._createdonbehalfof_value === oid).length}`;
+    debugInfo += `createdby match: ${cases.filter(c => c._createdby_value === oid).length} | onbehalf match: ${cases.filter(c => c._createdonbehalfby_value === oid).length}`;
   } catch(e) { debugInfo = "DEBUG ERROR: " + e.message; }
 
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
