@@ -122,7 +122,7 @@
             transform: translate(-50%, -50%);
             width: 380px;
             height: 380px;
-            opacity: 0.06;
+            opacity: 0.15;
             pointer-events: none;
             z-index: -1;
             object-fit: contain;
@@ -347,40 +347,53 @@
     const loginRequest = { scopes: ["User.Read"] };
 
     // Initialize MSAL
-    const msalInstance = new msal.PublicClientApplication(msalConfig);
+    var msalInstance = null;
+    var msalReady = false;
 
-    let msalReady = false;
-
-    msalInstance.initialize().then(() => {
-        msalReady = true;
-        console.log("MSAL initialized successfully");
-        // Handle redirect response (mobile fallback)
-        msalInstance.handleRedirectPromise().then((response) => {
-            if (response) {
-                msalInstance.setActiveAccount(response.account);
-                onLoginSuccess(response.account);
-            } else {
-                // Already logged in? (page refresh / session still active)
-                const accounts = msalInstance.getAllAccounts();
-                if (accounts.length > 0) {
-                    msalInstance.setActiveAccount(accounts[0]);
-                    onLoginSuccess(accounts[0]);
-                }
-            }
-        }).catch((err) => console.error("Redirect error:", err));
-    }).catch((err) => {
-        console.error("MSAL init error:", err);
-        alert("MSAL init failed: " + err.message);
-    });
+    if (typeof msal === 'undefined') {
+        console.error("MSAL library not loaded");
+        document.getElementById("header-sign-in").addEventListener("click", function() {
+            alert("Authentication library failed to load. Please refresh the page.");
+        });
+    } else {
+        try {
+            msalInstance = new msal.PublicClientApplication(msalConfig);
+            msalInstance.initialize().then(function() {
+                msalReady = true;
+                console.log("MSAL initialized successfully");
+                msalInstance.handleRedirectPromise().then(function(response) {
+                    if (response) {
+                        msalInstance.setActiveAccount(response.account);
+                        onLoginSuccess(response.account);
+                    } else {
+                        var accounts = msalInstance.getAllAccounts();
+                        if (accounts.length > 0) {
+                            msalInstance.setActiveAccount(accounts[0]);
+                            onLoginSuccess(accounts[0]);
+                        }
+                    }
+                }).catch(function(err) { console.error("Redirect error:", err); });
+            }).catch(function(err) {
+                console.error("MSAL init error:", err);
+                alert("Auth init failed: " + err.message);
+            });
+        } catch(e) {
+            alert("MSAL setup error: " + e.message);
+        }
+    }
 
     // ─── Sign In ───
-    async function signIn() {
+    window.signIn = async function() {
+        if (!msalInstance) {
+            alert("Auth library not loaded. Please refresh.");
+            return;
+        }
         if (!msalReady) {
             alert("Still loading, please wait a moment and try again.");
             return;
         }
         try {
-            const response = await msalInstance.loginPopup(loginRequest);
+            var response = await msalInstance.loginPopup(loginRequest);
             msalInstance.setActiveAccount(response.account);
             onLoginSuccess(response.account);
         } catch (error) {
@@ -393,13 +406,13 @@
                 }
             } else if (error.errorCode !== "user_cancelled") {
                 console.error("Login error:", error);
-                alert("Sign in error: " + error.message);
+                alert("Sign in error: " + (error.message || JSON.stringify(error)));
             }
         }
-    }
+    };
 
     // ─── Sign Out ───
-    function signOut() {
+    window.signOut = function() {
         msalInstance.logoutPopup({
             postLogoutRedirectUri: window.location.origin + window.location.pathname,
             mainWindowRedirectUri: window.location.origin + window.location.pathname,
