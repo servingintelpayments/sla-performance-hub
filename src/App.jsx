@@ -367,10 +367,10 @@ function generateDemoData(startDate, endDate, selectedMembers) {
   });
 
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.round(t1SLAMet / t1Cases * 100) : 0, fcrRate: t1Cases ? Math.round(t1FCR / t1Cases * 100) : 0, escalationRate: t1Cases ? Math.round(t1Escalated / t1Cases * 100) : 0, avgResolutionTime: `${avgResTime} hrs`, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.round(t2SLAMet / t2Resolved * 100) : "N/A", escalationRate: t2Cases ? Math.round(t2Escalated / t2Cases * 100) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.round(t3SLAMet / t3Resolved * 100) : "N/A" },
-    phone: { totalCalls, answered, abandoned, answerRate: totalCalls ? Math.round(answered / totalCalls * 100) : 0, avgAHT },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.min(100, Math.round(t1SLAMet / t1Cases * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: `${avgResTime} hrs`, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A" },
+    phone: { totalCalls, answered, abandoned, answerRate: totalCalls ? Math.min(100, Math.round(answered / totalCalls * 100)) : 0, avgAHT },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : "N/A" },
     csat: { responses: csatResponses, avgScore: csatAvg || "N/A" },
     overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: answered, abandonedCalls: abandoned },
@@ -409,10 +409,10 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   const totalCases = await safeCount("Total Cases",
     `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const resolvedCases = await safeFetchCount("Resolved",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const slaMet = resolvedCases;
   const fcrCases = await safeFetchCount("FCR",
-    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
+    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const escalatedCases = await safeCount("Escalated",
     `incidents?$filter=_ownerid_value eq ${oid} and isescalated eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const activeCases = await safeCount("Active",
@@ -456,7 +456,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   try {
     progress("CSAT");
     const csatData = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=cr7fe_new_csatscore`
+      `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_csatresponsereceived eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=cr7fe_new_csatscore`
     );
     csatResponses = csatData.value?.length || 0;
     if (csatResponses > 0) {
@@ -469,7 +469,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   try {
     progress("Resolution time");
     const resolved = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT} and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
@@ -493,9 +493,9 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     }
   } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
 
-  const slaCompliance = totalCases > 0 ? Math.round(slaMet / totalCases * 100) : "N/A";
-  const fcrRate = totalCases > 0 ? Math.round(fcrCases / totalCases * 100) : "N/A";
-  const escalationRate = totalCases > 0 ? Math.round(escalatedCases / totalCases * 100) : "N/A";
+  const slaCompliance = totalCases > 0 ? Math.min(100, Math.round(slaMet / totalCases * 100)) : "N/A";
+  const fcrRate = totalCases > 0 ? Math.min(100, Math.round(fcrCases / totalCases * 100)) : "N/A";
+  const escalationRate = totalCases > 0 ? Math.min(100, Math.round(escalatedCases / totalCases * 100)) : "N/A";
 
   return {
     member,
@@ -545,9 +545,9 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const t1SLAMet = await safeFetchCount("SLA Met Cases",
-    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1FCR = await safeFetchCount("FCR Cases",
-    `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
 
@@ -573,14 +573,14 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
 
   const csatResponses = await safeCount("CSAT Responses",
-    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$count=true&$top=1`);
+    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
 
   let csatAvg = "N/A";
   if (csatResponses > 0) {
     try {
       progress("Fetching CSAT Scores...");
       const csatData = await d365Fetch(
-        `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=cr7fe_new_csatscore`
+        `incidents?$filter=cr7fe_new_csatresponsereceived eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=cr7fe_new_csatscore`
       );
       if (csatData.value?.length > 0) {
         const scores = csatData.value.map(r => parseFloat(r.cr7fe_new_csatscore)).filter(n => !isNaN(n));
@@ -595,7 +595,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
   try {
     progress("Fetching resolution times...");
     const resolved = await d365Fetch(
-      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT} and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
+      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
@@ -630,7 +630,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT} and actualdurationminutes gt 0&$select=actualdurationminutes`);
   const phoneAbandoned = await safeFetchCount("Phone Abandoned",
     `phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT} and actualdurationminutes eq 0&$select=actualdurationminutes`);
-  const phoneAnswerRate = phoneTotal > 0 ? Math.round(phoneAnswered / phoneTotal * 100) : 0;
+  const phoneAnswerRate = phoneTotal > 0 ? Math.min(100, Math.round(phoneAnswered / phoneTotal * 100)) : 0;
 
   let phoneAHT = "N/A";
   try {
@@ -658,8 +658,8 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
         d365Fetch(`incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=escalatedon&$top=5000`),
         d365Fetch(`incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=escalatedon&$top=5000`),
         d365Fetch(`phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualstart&$top=5000`),
-        d365Fetch(`incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=modifiedon,cr7fe_new_csatscore&$top=5000`),
-        d365Fetch(`incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=modifiedon&$top=5000`),
+        d365Fetch(`incidents?$filter=cr7fe_new_csatresponsereceived eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=createdon,cr7fe_new_csatscore&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=createdon&$top=5000`),
       ]);
       const bucket = (records, dateField) => {
         const map = {};
@@ -681,8 +681,8 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
       const t2Map = bucket(t2Raw, "escalatedon");
       const t3Map = bucket(t3Raw, "escalatedon");
       const phoneMap = bucket(phoneRaw, "actualstart");
-      const csatMap = bucketAvg(csatRaw, "modifiedon", "cr7fe_new_csatscore");
-      const slaMap = bucket(slaRaw, "modifiedon");
+      const csatMap = bucketAvg(csatRaw, "createdon", "cr7fe_new_csatscore");
+      const slaMap = bucket(slaRaw, "createdon");
       for (let i = 0; i < dayCount; i++) {
         const d = new Date(startD); d.setDate(d.getDate() + i);
         const key = d.toISOString().slice(0, 10);
@@ -702,9 +702,9 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
   const allResolved = t1SLAMet + t2Resolved + t3Resolved;
 
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.round(t1SLAMet / t1Cases * 100) : 0, fcrRate: t1Cases ? Math.round(t1FCR / t1Cases * 100) : 0, escalationRate: t1Cases ? Math.round(t1Escalated / t1Cases * 100) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.round(t2SLAMet / t2Resolved * 100) : "N/A", escalationRate: t2Cases ? Math.round(t2Escalated / t2Cases * 100) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.round(t3SLAMet / t3Resolved * 100) : "N/A" },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.min(100, Math.round(t1SLAMet / t1Cases * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A" },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A") },
     csat: { responses: csatResponses, avgScore: csatAvg },
     phone: { totalCalls: phoneTotal, incoming: phoneTotal, outgoing: 0, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: 0, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
@@ -854,7 +854,7 @@ function TierSection({ tier, data, members }) {
   const d = data[`tier${tier}`]; if (!d) return null;
   const tierMembers = (members || []).filter(m => m.tier === tier);
   const slaRate = d.slaCompliance;
-  const slaMet = d.slaMet || 0;
+  const slaMet = Math.min(d.slaMet || 0, d.total);
   const slaMissed = Math.max(0, d.total - slaMet);
   const metrics = [];
   if (t.metrics.includes("sla_compliance")) metrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%" });
@@ -983,7 +983,7 @@ function MemberSection({ memberData, index }) {
   const colors = [C.blue, C.accent, C.purple, "#2D9D78", C.gold, "#E91E63", "#00BCD4", "#795548"];
   const color = colors[index % colors.length];
   const colorDark = color + "DD";
-  const slaMet = d.slaMet || 0;
+  const slaMet = Math.min(d.slaMet || 0, d.totalCases);
   const slaMissed = Math.max(0, d.totalCases - slaMet);
   const metrics = isTier1 ? [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
@@ -1058,8 +1058,8 @@ function TeamSummary({ memberDataList }) {
       </div>
       {totals.totalCases > 0 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("sla_compliance", totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div></div>
-          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("fcr_rate", totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team FCR</div></div>
+          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("sla_compliance", totals.totalCases ? Math.min(100, Math.round(totals.slaMet / totals.totalCases * 100)) : 0)} value={totals.totalCases ? Math.min(100, Math.round(totals.slaMet / totals.totalCases * 100)) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div></div>
+          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("fcr_rate", totals.totalCases ? Math.min(100, Math.round(totals.fcrCases / totals.totalCases * 100)) : 0)} value={totals.totalCases ? Math.min(100, Math.round(totals.fcrCases / totals.totalCases * 100)) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team FCR</div></div>
           {totals.csatResponses > 0 && <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("csat_score", +(totals.csatTotal / totals.csatResponses).toFixed(1))} value={+(totals.csatTotal / totals.csatResponses).toFixed(1)} unit="/5" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team CSAT</div></div>}
         </div>
       )}
@@ -1320,7 +1320,7 @@ function Dashboard({ user, onLogout }) {
     }), { totalCases: 0, resolved: 0, slaMet: 0, emailCases: 0, emailResolved: 0, csatResponses: 0 });
     return {
       overall: { created: totals.totalCases, resolved: totals.resolved, csatResponses: totals.csatResponses, answeredCalls: 0, abandonedCalls: 0 },
-      email: { total: totals.emailCases, responded: 0, resolved: totals.emailResolved, slaCompliance: totals.emailCases ? Math.round(totals.emailResolved / totals.emailCases * 100) : "N/A" },
+      email: { total: totals.emailCases, responded: 0, resolved: totals.emailResolved, slaCompliance: totals.emailCases ? Math.min(100, Math.round(totals.emailResolved / totals.emailCases * 100)) : "N/A" },
       phone: { totalCalls: 0, answered: 0, abandoned: 0, answerRate: 0, avgAHT: 0 },
       timeline: [],
     };
