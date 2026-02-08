@@ -6,48 +6,53 @@ import LandingPage from "./LandingPage";
 import { getMsalInstance, loginRequest } from "./authConfig";
 
 function Root() {
-    const [msalInstance, setMsalInstance] = useState(null);
-    const [account, setAccount] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [signInLoading, setSignInLoading] = useState(false);
-    const [error, setError] = useState(null);
+    var _s1 = useState(null), msalInstance = _s1[0], setMsalInstance = _s1[1];
+    var _s2 = useState(null), account = _s2[0], setAccount = _s2[1];
+    var _s3 = useState(false), signInLoading = _s3[0], setSignInLoading = _s3[1];
+    var _s4 = useState(null), error = _s4[0], setError = _s4[1];
 
-    // Initialize MSAL on mount
-    useEffect(() => {
+    // Load MSAL in background — don't block the page
+    useEffect(function() {
         getMsalInstance()
-            .then((instance) => {
+            .then(function(instance) {
                 setMsalInstance(instance);
-                const active = instance.getActiveAccount();
+                var active = instance.getActiveAccount();
                 if (active) {
                     setAccount(active);
                 }
-                setLoading(false);
             })
-            .catch((err) => {
+            .catch(function(err) {
                 console.error("MSAL init error:", err);
-                setError("Auth failed to load: " + err.message);
-                setLoading(false);
+                // Don't show error yet — show it only when user tries to sign in
             });
     }, []);
 
     // Sign in handler
-    const handleSignIn = async () => {
-        if (!msalInstance) {
-            setError("Auth not ready. Please refresh.");
-            return;
-        }
+    var handleSignIn = async function() {
         setSignInLoading(true);
         setError(null);
 
+        // If MSAL isn't ready yet, try loading it now
+        var instance = msalInstance;
+        if (!instance) {
+            try {
+                instance = await getMsalInstance();
+                setMsalInstance(instance);
+            } catch (err) {
+                setError("Auth failed to load. Please refresh the page.");
+                setSignInLoading(false);
+                return;
+            }
+        }
+
         try {
-            const response = await msalInstance.loginPopup(loginRequest);
-            msalInstance.setActiveAccount(response.account);
+            var response = await instance.loginPopup(loginRequest);
+            instance.setActiveAccount(response.account);
             setAccount(response.account);
         } catch (err) {
             if (err.errorCode === "popup_window_error" || err.errorCode === "empty_window_error") {
-                // Popup blocked (mobile) — fallback to redirect
                 try {
-                    await msalInstance.loginRedirect(loginRequest);
+                    await instance.loginRedirect(loginRequest);
                 } catch (redirectErr) {
                     setError("Login failed: " + redirectErr.message);
                 }
@@ -60,36 +65,24 @@ function Root() {
         }
     };
 
-    // Loading state
-    if (loading) {
-        return (
-            <div style={{
-                background: "#0d0f14", color: "#8b8fa3", minHeight: "100vh",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 14,
-            }}>
-                Loading...
-            </div>
-        );
-    }
-
-    // Not signed in → show landing page
+    // Not signed in → show landing page immediately
     if (!account) {
-        return (
-            <LandingPage
-                onSignIn={handleSignIn}
-                loading={signInLoading}
-                error={error}
-            />
-        );
+        return React.createElement(LandingPage, {
+            onSignIn: handleSignIn,
+            loading: signInLoading,
+            error: error,
+        });
     }
 
     // Signed in → show dashboard
-    return <App msalAccount={account} msalInstance={msalInstance} />;
+    return React.createElement(App, {
+        msalAccount: account,
+        msalInstance: msalInstance,
+    });
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-    <React.StrictMode>
-        <Root />
-    </React.StrictMode>
+    React.createElement(React.StrictMode, null,
+        React.createElement(Root)
+    )
 );
