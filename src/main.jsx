@@ -11,7 +11,7 @@ function Root() {
     var _s3 = useState(false), signInLoading = _s3[0], setSignInLoading = _s3[1];
     var _s4 = useState(null), error = _s4[0], setError = _s4[1];
 
-    // Load MSAL in background — don't block the page
+    // Load MSAL in background
     useEffect(function() {
         getMsalInstance()
             .then(function(instance) {
@@ -23,49 +23,53 @@ function Root() {
             })
             .catch(function(err) {
                 console.error("MSAL init error:", err);
-                // Don't show error yet — show it only when user tries to sign in
             });
     }, []);
 
     // Sign in handler
-    var handleSignIn = async function() {
+    var handleSignIn = function() {
         setSignInLoading(true);
         setError(null);
 
-        // If MSAL isn't ready yet, try loading it now
-        var instance = msalInstance;
-        if (!instance) {
-            try {
-                instance = await getMsalInstance();
-                setMsalInstance(instance);
-            } catch (err) {
-                setError("Auth failed to load. Please refresh the page.");
-                setSignInLoading(false);
+        // Safety timeout — reset after 15 seconds no matter what
+        var timeout = setTimeout(function() {
+            setSignInLoading(false);
+            setError("Sign in timed out. Please try again.");
+        }, 15000);
+
+        // Get or create MSAL instance
+        var go = msalInstance ? Promise.resolve(msalInstance) : getMsalInstance();
+
+        go.then(function(instance) {
+            setMsalInstance(instance);
+            return instance.loginPopup(loginRequest);
+        }).then(function(response) {
+            clearTimeout(timeout);
+            var instance = msalInstance || response.account;
+            if (response && response.account) {
+                getMsalInstance().then(function(inst) {
+                    inst.setActiveAccount(response.account);
+                    setAccount(response.account);
+                    setSignInLoading(false);
+                });
+            }
+        }).catch(function(err) {
+            clearTimeout(timeout);
+            setSignInLoading(false);
+            if (err && err.errorCode === "user_cancelled") {
+                // User closed popup — no error needed
                 return;
             }
-        }
-
-        try {
-            var response = await instance.loginPopup(loginRequest);
-            instance.setActiveAccount(response.account);
-            setAccount(response.account);
-        } catch (err) {
-            if (err.errorCode === "popup_window_error" || err.errorCode === "empty_window_error") {
-                try {
-                    await instance.loginRedirect(loginRequest);
-                } catch (redirectErr) {
-                    setError("Login failed: " + redirectErr.message);
-                }
-            } else if (err.errorCode !== "user_cancelled") {
-                setError("Sign in failed: " + (err.message || "Unknown error"));
-                console.error("Login error:", err);
+            if (err && (err.errorCode === "popup_window_error" || err.errorCode === "empty_window_error")) {
+                setError("Popup was blocked. Please allow popups for this site.");
+                return;
             }
-        } finally {
-            setSignInLoading(false);
-        }
+            setError("Sign in failed: " + (err && err.message ? err.message : "Unknown error"));
+            console.error("Login error:", err);
+        });
     };
 
-    // Not signed in → show landing page immediately
+    // Not signed in → show landing page
     if (!account) {
         return React.createElement(LandingPage, {
             onSignIn: handleSignIn,
