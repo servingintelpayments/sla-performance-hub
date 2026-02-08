@@ -414,19 +414,6 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   const casesCreatedBy = await safeFetchCount("Cases Created",
     `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
-  // DEBUG: dump raw case data
-  let debugInfo = "";
-  try {
-    const debugData = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$top=10`
-    );
-    const cases = debugData.value || [];
-    debugInfo = `OID: ${oid} | UTC range: ${s}T${sT} to ${e}T${eT} | Owned: ${cases.length}\n`;
-    cases.forEach((c, i) => {
-      debugInfo += `#${i+1} "${c.title}" | createdby=${c._createdby_value} | match=${c._createdby_value === oid ? 'YES' : 'NO'}\n`;
-    });
-  } catch(e2) { debugInfo = "DEBUG ERROR: " + e2.message; }
-
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
     `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
   const answeredLive = await safeFetchCount("Answered Calls",
@@ -508,7 +495,6 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     csatResponses, csatAvg,
     avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
     errors,
-    debugInfo,
   };
 }
 
@@ -1019,7 +1005,6 @@ function MemberSection({ memberData, index }) {
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
         <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
-      {d.debugInfo && <div style={{ background: "#1a1a2e", color: "#00ff88", padding: "12px 16px", borderRadius: 8, fontSize: 11, fontFamily: "'Space Mono', monospace", whiteSpace: "pre-wrap", marginBottom: 12, lineHeight: 1.6 }}>{d.debugInfo}</div>}
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
