@@ -3,7 +3,7 @@ import React from "react";
 
 var SignInIcon = function() {
     return React.createElement("svg", {
-        width: 16, height: 16, fill: "none", viewBox: "0 0 24 24",
+        width: 18, height: 18, fill: "none", viewBox: "0 0 24 24",
         stroke: "currentColor", strokeWidth: 2.5
     }, React.createElement("path", {
         strokeLinecap: "round", strokeLinejoin: "round",
@@ -52,13 +52,12 @@ export default function LandingPage(props) {
             bottom: -100, left: -100, pointerEvents: "none", zIndex: 0,
         }}),
 
-        // Header
+        // Header — logo only, NO sign in button
         React.createElement("header", { style: {
             position: "sticky", top: 0, zIndex: 100,
             background: "rgba(13,15,20,0.95)", backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
-            borderBottom: "none",
-            padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "14px 20px", display: "flex", alignItems: "center",
         }},
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
                 React.createElement("div", { style: {
@@ -68,83 +67,84 @@ export default function LandingPage(props) {
                     fontWeight: 800, fontSize: 18, color: "white", flexShrink: 0,
                 }}, "S"),
                 React.createElement("div", null,
-                    React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: "#f0f0f0", lineHeight: 1.15 } }, "Service and Operations Dashboard"),
+                    React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: "#f0f0f0", lineHeight: 1.15 } }, "Service and Operations Dashboard"),
                     React.createElement("div", { style: { fontSize: 9, fontWeight: 500, letterSpacing: 2, textTransform: "uppercase", color: "#5a5e72", lineHeight: 1.15 } }, "Performance Analytics")
                 )
-            ),
-            React.createElement("button", {
-                style: {
-                    background: "linear-gradient(135deg, #e8922a, #d47a15)",
-                    color: "white", border: "none", padding: "10px 20px", borderRadius: 10,
-                    fontFamily: "'DM Sans', sans-serif", fontWeight: 700, fontSize: 14,
-                    cursor: "pointer", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-                },
-                onClick: onSignIn, disabled: loading,
-            }, React.createElement(SignInIcon), loading ? "Signing in..." : "Sign In")
+            )
         ),
 
-        // Hero section
+        // Hero section with EXTRA LARGE transparent logo
         React.createElement("section", { style: {
-            padding: "48px 20px 36px", textAlign: "center", position: "relative", zIndex: 1,
+            padding: "60px 20px 36px", textAlign: "center", position: "relative", zIndex: 1,
+            minHeight: 400,
         }},
-            // Large silhouette logo background
+            // EXTRA LARGE transparent logo background
             React.createElement("img", {
                 src: "./logo_bg.png",
                 alt: "",
                 style: {
                     position: "absolute", top: "50%", left: "50%",
                     transform: "translate(-50%, -50%)",
-                    width: "90vw", maxWidth: 600, height: "auto",
-                    opacity: 0.12, pointerEvents: "none", zIndex: -1,
+                    width: "110vw", maxWidth: 900, height: "auto",
+                    opacity: 0.07, pointerEvents: "none", zIndex: 0,
+                    filter: "grayscale(100%) brightness(2)",
                 },
                 onError: function(e) { e.target.style.display = "none"; },
             }),
 
             // Hero content
-            React.createElement("h1", { style: {
-                fontFamily: "'Plus Jakarta Sans', sans-serif",
-                fontWeight: 800, fontSize: "clamp(32px, 8vw, 56px)", lineHeight: 1.05, marginBottom: 16,
-            }},
-                "Real-time SLA",
-                React.createElement("br"),
-                React.createElement("span", { style: {
-                    background: "linear-gradient(135deg, #e8922a, #f5c842)",
-                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
-                }}, "Intelligence")
-            ),
-            React.createElement("p", { style: {
-                color: "#8b8fa3", fontSize: 15, lineHeight: 1.6, maxWidth: 380, margin: "0 auto 28px",
-            }}, "Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365."),
+            React.createElement("div", { style: { position: "relative", zIndex: 1 } },
+                React.createElement("h1", { style: {
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
+                    fontWeight: 800, fontSize: "clamp(36px, 8vw, 60px)", lineHeight: 1.05, marginBottom: 20,
+                }},
+                    "Real-time SLA",
+                    React.createElement("br"),
+                    React.createElement("span", { style: {
+                        background: "linear-gradient(135deg, #e8922a, #f5c842)",
+                        WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+                    }}, "Intelligence")
+                ),
+                React.createElement("p", { style: {
+                    color: "#8b8fa3", fontSize: 16, lineHeight: 1.6, maxWidth: 420, margin: "0 auto 32px",
+                }}, "Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365."),
 
-            // Error message
-            error && React.createElement("div", { style: {
-                color: "#e85a5a", fontSize: 13, textAlign: "center", marginBottom: 16,
-            }}, "\u26A0\uFE0F " + error),
+                // Error message
+                error && React.createElement("div", { style: {
+                    color: "#e85a5a", fontSize: 13, textAlign: "center", marginBottom: 16,
+                    background: "rgba(232,90,90,0.1)", padding: "8px 16px", borderRadius: 8,
+                    display: "inline-block",
+                }}, "\u26A0\uFE0F " + error),
 
-            // Sign in button
-            React.createElement("button", {
-                style: {
-                    background: "linear-gradient(135deg, #e8922a, #d47a15)",
-                    color: "white", border: "none", padding: "14px 32px", borderRadius: 14,
-                    fontFamily: "'DM Sans', sans-serif", fontWeight: 700, fontSize: 16,
-                    cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8,
-                    boxShadow: "0 4px 20px rgba(232,146,42,0.25)", marginBottom: 40,
-                },
-                onClick: onSignIn, disabled: loading,
-            }, React.createElement(SignInIcon), loading ? "Signing in..." : "Sign In with Microsoft")
+                // SINGLE Sign in button
+                React.createElement("div", null,
+                    React.createElement("button", {
+                        style: {
+                            background: "linear-gradient(135deg, #e8922a, #d47a15)",
+                            color: "white", border: "none", padding: "16px 36px", borderRadius: 14,
+                            fontFamily: "'DM Sans', sans-serif", fontWeight: 700, fontSize: 17,
+                            cursor: loading ? "not-allowed" : "pointer",
+                            display: "inline-flex", alignItems: "center", gap: 10,
+                            boxShadow: "0 4px 24px rgba(232,146,42,0.3)", marginBottom: 48,
+                            opacity: loading ? 0.7 : 1,
+                        },
+                        onClick: onSignIn, disabled: loading,
+                    }, React.createElement(SignInIcon), loading ? "Signing in..." : "Sign In with Microsoft")
+                )
+            )
         ),
 
         // Tier cards
         React.createElement("div", { style: {
             display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: 12, maxWidth: 560, margin: "0 auto 40px", padding: "0 20px", position: "relative", zIndex: 1,
+            gap: 10, maxWidth: 560, margin: "0 auto 40px", padding: "0 20px", position: "relative", zIndex: 1,
         }},
             tiers.map(function(t) {
                 return React.createElement("div", {
                     key: t.name,
                     style: {
-                        background: "#161922", border: "none", outline: "none",
-                        borderRadius: 14, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14,
+                        background: "#161922", borderRadius: 14, padding: "16px 18px",
+                        display: "flex", alignItems: "center", gap: 14,
                     }
                 },
                     React.createElement("div", { style: {
@@ -157,7 +157,7 @@ export default function LandingPage(props) {
                     React.createElement("span", { style: {
                         marginLeft: "auto", fontSize: 10, fontWeight: 600, letterSpacing: 1,
                         textTransform: "uppercase", padding: "4px 10px", borderRadius: 6,
-                        background: "rgba(255,255,255,0.04)", color: "#5a5e72", border: "none",
+                        background: "rgba(255,255,255,0.04)", color: "#5a5e72",
                     }}, t.badge)
                 );
             })
@@ -178,8 +178,7 @@ export default function LandingPage(props) {
                 return React.createElement("div", {
                     key: f.text,
                     style: {
-                        background: "#161922", border: "none", outline: "none",
-                        borderRadius: 12, padding: 16, textAlign: "center",
+                        background: "#161922", borderRadius: 12, padding: 16, textAlign: "center",
                     }
                 },
                     React.createElement("div", { style: { fontSize: 22, marginBottom: 8 } }, f.icon),
@@ -190,8 +189,7 @@ export default function LandingPage(props) {
 
         // Footer
         React.createElement("footer", { style: {
-            textAlign: "center", padding: "24px 20px 32px",
-            borderTop: "none", position: "relative", zIndex: 1,
+            textAlign: "center", padding: "24px 20px 32px", position: "relative", zIndex: 1,
         }},
             React.createElement("p", { style: { fontSize: 11, color: "#5a5e72" } }, "\u00A9 2026 ServingIntel \u00B7 Service and Operations Dashboard")
         )
