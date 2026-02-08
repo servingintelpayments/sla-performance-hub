@@ -142,7 +142,7 @@ export default function LandingPage(props) {
                 return React.createElement("div", {
                     key: t.name,
                     style: Object.assign({}, kill, {
-                        background: "#161922", borderRadius: 14, padding: "16px 18px",
+                        background: "transparent", borderRadius: 14, padding: "16px 18px",
                         display: "flex", alignItems: "center", gap: 14,
                     })
                 },
@@ -177,7 +177,7 @@ export default function LandingPage(props) {
                 return React.createElement("div", {
                     key: f.text,
                     style: Object.assign({}, kill, {
-                        background: "#161922", borderRadius: 12, padding: 16, textAlign: "center",
+                        background: "transparent", borderRadius: 12, padding: 16, textAlign: "center",
                     })
                 },
                     React.createElement("div", { style: { fontSize: 22, marginBottom: 8 } }, f.icon),
