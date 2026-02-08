@@ -484,9 +484,10 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   };
 }
 
-async function fetchLiveD365Data(startDate, endDate, onProgress) {
+async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endTime) {
   const s = startDate;
   const e = endDate;
+  const sT = (startTime || "00:00") + ":00Z", eT = (endTime || "23:59") + ":59Z";
   const errors = [];
   const progress = (msg) => onProgress?.(`D365: ${msg}`);
 
@@ -688,10 +689,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   };
 }
 
-async function fetchLiveData(config, startDate, endDate, onProgress) {
+async function fetchLiveData(config, startDate, endDate, onProgress, startTime, endTime) {
   const progress = (msg) => onProgress?.(msg);
   progress("Connecting to Dynamics 365...");
-  const d365Data = await fetchLiveD365Data(startDate, endDate, progress);
+  const d365Data = await fetchLiveD365Data(startDate, endDate, progress, startTime, endTime);
   progress("Compiling report...");
   return {
     ...d365Data,
@@ -1277,7 +1278,7 @@ function Dashboard({ user, onLogout }) {
         setData({ ...combined, source: "live" });
         if (allErrors.length > 0) setLiveErrors(allErrors);
       } else {
-        const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress);
+        const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress, startTime, endTime);
         setData(d);
         if (d.errors?.length > 0) setLiveErrors(d.errors);
       }
