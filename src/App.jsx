@@ -775,7 +775,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
   if (noTarget) {
     const displayVal = isNA ? "N/A" : (typeof value === "string" ? value : `${value}${unit || ""}`);
     return (
-      <div style={{ background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px", position: "relative", overflow: "hidden" }}>
+      <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
         </div>
@@ -795,7 +795,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
   const displayVal = isNA ? "N/A" : `${value}${unit || ""}`;
 
   return (
-    <div style={{ background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px", position: "relative", overflow: "hidden" }}>
+    <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
         <div style={{ padding: "3px 10px", borderRadius: 10, background: pillColor, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>{met === null ? "N/A" : met ? "Met" : "Miss"}</div>
@@ -813,7 +813,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
 
 function StatCard({ label, value, sub, color }) {
   return (
-    <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: `1.5px solid ${C.border}`, padding: "14px 16px", textAlign: "center" }}>
+    <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: "none", padding: "14px 16px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
       <div style={{ fontSize: 10, fontWeight: 600, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 28, fontWeight: 800, color: color || C.textDark, fontFamily: "'Space Mono', monospace", lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>{sub}</div>}
@@ -856,7 +856,7 @@ function TierSection({ tier, data, members }) {
           </div>
         )}
       </div>
-      <div style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
+      <div className="stat-row" style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
         <StatCard label={`${t.label} SLA Rate`} value={slaRate === "N/A" ? "N/A" : `${slaRate}%`} color={slaRate !== "N/A" && slaRate >= 90 ? "#2D9D78" : "#E5544B"} />
         <StatCard label="SLAs Met" value={`${slaMet}/${d.total}`} color="#2D9D78" />
         <StatCard label="SLAs Missed" value={`${slaMissed}/${d.total}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
@@ -864,7 +864,7 @@ function TierSection({ tier, data, members }) {
         <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
       </div>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>{t.label} SLA Status — All Metrics</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {metrics.map((m, i) => (<MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />))}
       </div>
       {tier === 1 && data.phone && (() => {
@@ -883,7 +883,7 @@ function TierSection({ tier, data, members }) {
           </div>
         );
         return (<>
-          <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+          <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📞</span> PHONE METRICS</div>
             <MR icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
             <MR icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
@@ -892,7 +892,7 @@ function TierSection({ tier, data, members }) {
             <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
           {data.email && (
-            <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+            <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: C.blue, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📧</span> EMAIL METRICS</div>
               <MR icon="📨" label="Total Email Cases" value={data.email.total ?? 0} accent={C.textDark} />
               <MR icon="💬" label="Responded" value={data.email.responded ?? 0} accent={C.orange} badge={(data.email.responded ?? 0) > 0 ? "miss" : "met"} />
@@ -982,7 +982,7 @@ function MemberSection({ memberData, index }) {
           <div><div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{m.name}</div><div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div></div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
+      <div className="stat-row" style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
         <StatCard label="Cases Owned" value={d.totalCases} color={color} />
         <StatCard label="Cases Created" value={d.casesCreatedBy ?? "—"} color={C.blue} />
         <StatCard label="Resolved" value={d.resolvedCases} color="#2D9D78" />
@@ -990,11 +990,11 @@ function MemberSection({ memberData, index }) {
         <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
       </div>
       {isTier1 && (
-        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
+        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📞</span> Phone Activity</div>
           <PhoneStat icon="📞" label="Total Calls" value={d.totalPhoneCalls ?? 0} accent={C.textDark} />
           <PhoneStat icon="✅" label="Answered Calls" value={d.answeredLive ?? 0} accent="#2D9D78" />
@@ -1044,20 +1044,20 @@ function ChartsPanel({ data }) {
   if (!tl || tl.length < 2) return null;
   const interval = Math.max(0, Math.floor(tl.length / 8));
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
+    <div className="chart-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📊 Daily Cases by Tier</div>
         <ResponsiveContainer width="100%" height={220}><BarChart data={tl}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} /><Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} /></BarChart></ResponsiveContainer>
       </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📈 SLA Compliance Trend</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📞 Daily Call Volume</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>⭐ CSAT Score Trend</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
@@ -1112,7 +1112,7 @@ function MultiMemberSelect({ selected, onChange, members }) {
 
 function ConnectionBar({ d365Connected, isLive, onOpenSettings }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 28px", background: C.card, borderBottom: `1px solid ${C.border}`, fontSize: 11 }}>
+    <div className="conn-bar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 28px", background: C.card, borderBottom: `1px solid ${C.border}`, fontSize: 11 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
         <span style={{ fontWeight: 600, color: C.textLight, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Data Sources</span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Connected ? C.green : C.accent }} /><span style={{ fontWeight: 600, color: d365Connected ? C.green : C.accent }}>D365</span><span style={{ color: C.textLight }}>{d365Connected ? "Connected" : "Not connected"}</span></span>
@@ -1305,15 +1305,35 @@ function Dashboard({ user, onLogout }) {
   return (
     <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
-      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } } @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } } @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } } @media print { .no-print { display: none !important; } }`}</style>
+      <style>{`
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@media print { .no-print { display: none !important; } }
+@media (max-width: 900px) {
+  .dash-header { flex-wrap: wrap; gap: 8px !important; padding: 14px 16px !important; }
+  .dash-header-title { font-size: 14px !important; }
+  .dash-header-sub { display: none !important; }
+  .dash-header-actions { gap: 6px !important; }
+  .dash-header-actions > span:first-child { display: none !important; }
+  .dash-layout { flex-direction: column !important; }
+  .dash-sidebar { width: 100% !important; min-width: unset !important; min-height: unset !important; border-right: none !important; border-bottom: 1px solid ${C.border} !important; padding: 16px !important; }
+  .dash-main { padding: 16px !important; min-height: unset !important; }
+  .dash-sidebar-toggle { display: flex !important; }
+  .metric-grid-2 { grid-template-columns: 1fr !important; }
+  .chart-grid-2 { grid-template-columns: 1fr !important; }
+  .stat-row { flex-wrap: wrap !important; }
+  .conn-bar { flex-wrap: wrap; gap: 6px !important; padding: 6px 16px !important; font-size: 10px !important; }
+}
+`}</style>
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
-      <div className="no-print" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>S</div>
-          <div><h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h1><div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 · Operations</div></div>
+      <div className="no-print dash-header" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", flexShrink: 0 }}>S</div>
+          <div style={{ minWidth: 0 }}><h1 className="dash-header-title" style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Service and Operations Dashboard</h1><div className="dash-header-sub" style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 · Operations</div></div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 13, color: "#ffffff80", fontWeight: 500 }}>👤 {user?.name || "User"}</span>
+        <div className="dash-header-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <span style={{ fontSize: 13, color: "#ffffff80", fontWeight: 500, whiteSpace: "nowrap" }}>👤 {user?.name || "User"}</span>
           {d365Account && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: "#4CAF5030", color: "#81C784", fontWeight: 600 }}>🟢 D365</span>}
           {hasRun && <button onClick={handleExportPDF} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}><span>📄</span> Export PDF</button>}
           <button onClick={() => setShowSettings(true)} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 14px", fontSize: 14, cursor: "pointer" }}>⚙️</button>
@@ -1321,8 +1341,8 @@ function Dashboard({ user, onLogout }) {
         </div>
       </div>
       <ConnectionBar d365Connected={!!d365Account} isLive={isLive} onOpenSettings={() => setShowSettings(true)} />
-      <div style={{ display: "flex", maxWidth: 1500, margin: "0 auto" }}>
-        <div className="no-print" style={{ width: 310, minWidth: 310, background: C.card, borderRight: `1px solid ${C.border}`, padding: "24px 20px", minHeight: "calc(100vh - 110px)", display: "flex", flexDirection: "column" }}>
+      <div className="dash-layout" style={{ display: "flex", maxWidth: 1500, margin: "0 auto" }}>
+        <div className="no-print dash-sidebar" style={{ width: 310, minWidth: 310, background: C.card, borderRight: `1px solid ${C.border}`, padding: "24px 20px", minHeight: "calc(100vh - 110px)", display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>Configure Report</div>
           {d365Account && (
             <div style={{ marginBottom: 18 }}>
@@ -1378,7 +1398,7 @@ function Dashboard({ user, onLogout }) {
           {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a tier to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
         </div>
-        <div style={{ flex: 1, padding: "24px 28px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
+        <div className="dash-main" style={{ flex: 1, padding: "24px 28px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
           {!hasRun ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", textAlign: "center" }}>
               <div style={{ width: 100, height: 100, borderRadius: 24, background: `linear-gradient(135deg, ${C.accent}15, ${C.yellow}15)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>📊</div>
