@@ -21,25 +21,42 @@ export const loginRequest = {
     scopes: ["User.Read"],
 };
 
-// Create singleton MSAL instance (uses CDN-loaded msal)
-let msalInstance = null;
+// Wait for MSAL CDN to load (max 10 seconds)
+function waitForMsal(timeout = 10000) {
+    return new Promise(function(resolve, reject) {
+        if (typeof window.msal !== "undefined") {
+            resolve(window.msal);
+            return;
+        }
+        var start = Date.now();
+        var check = setInterval(function() {
+            if (typeof window.msal !== "undefined") {
+                clearInterval(check);
+                resolve(window.msal);
+            } else if (Date.now() - start > timeout) {
+                clearInterval(check);
+                reject(new Error("MSAL library failed to load. Please refresh the page."));
+            }
+        }, 100);
+    });
+}
+
+// Create singleton MSAL instance
+var msalInstance = null;
 
 export async function getMsalInstance() {
     if (msalInstance) return msalInstance;
 
-    if (typeof window.msal === "undefined") {
-        throw new Error("MSAL library not loaded");
-    }
-
-    msalInstance = new window.msal.PublicClientApplication(msalConfig);
+    var msalLib = await waitForMsal();
+    msalInstance = new msalLib.PublicClientApplication(msalConfig);
     await msalInstance.initialize();
 
     // Handle redirect (mobile fallback)
-    const response = await msalInstance.handleRedirectPromise();
+    var response = await msalInstance.handleRedirectPromise();
     if (response) {
         msalInstance.setActiveAccount(response.account);
     } else {
-        const accounts = msalInstance.getAllAccounts();
+        var accounts = msalInstance.getAllAccounts();
         if (accounts.length > 0) {
             msalInstance.setActiveAccount(accounts[0]);
         }
