@@ -55,9 +55,9 @@ export default function LandingPage(props) {
         // Header
         React.createElement("header", { style: {
             position: "sticky", top: 0, zIndex: 100,
-            background: "rgba(13,15,20,0.85)", backdropFilter: "blur(20px)",
+            background: "rgba(13,15,20,0.95)", backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            borderBottom: "none",
             padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
         }},
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
@@ -143,7 +143,7 @@ export default function LandingPage(props) {
                 return React.createElement("div", {
                     key: t.name,
                     style: {
-                        background: "#161922", border: "1px solid rgba(255,255,255,0.06)",
+                        background: "#161922", border: "none", outline: "none",
                         borderRadius: 14, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14,
                     }
                 },
@@ -157,7 +157,7 @@ export default function LandingPage(props) {
                     React.createElement("span", { style: {
                         marginLeft: "auto", fontSize: 10, fontWeight: 600, letterSpacing: 1,
                         textTransform: "uppercase", padding: "4px 10px", borderRadius: 6,
-                        background: "rgba(255,255,255,0.04)", color: "#5a5e72",
+                        background: "rgba(255,255,255,0.04)", color: "#5a5e72", border: "none",
                     }}, t.badge)
                 );
             })
@@ -178,7 +178,7 @@ export default function LandingPage(props) {
                 return React.createElement("div", {
                     key: f.text,
                     style: {
-                        background: "#161922", border: "none",
+                        background: "#161922", border: "none", outline: "none",
                         borderRadius: 12, padding: 16, textAlign: "center",
                     }
                 },
@@ -191,7 +191,7 @@ export default function LandingPage(props) {
         // Footer
         React.createElement("footer", { style: {
             textAlign: "center", padding: "24px 20px 32px",
-            borderTop: "1px solid rgba(255,255,255,0.06)", position: "relative", zIndex: 1,
+            borderTop: "none", position: "relative", zIndex: 1,
         }},
             React.createElement("p", { style: { fontSize: 11, color: "#5a5e72" } }, "\u00A9 2026 ServingIntel \u00B7 Service and Operations Dashboard")
         )
