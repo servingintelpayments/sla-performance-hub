@@ -398,7 +398,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
 
   const casesCreatedBy = await safeFetchCount("Cases Created",
-    `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
+    `incidents?$filter=(_createdby_value eq ${oid} or _createdonbehalfof_value eq ${oid}) and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
     `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
