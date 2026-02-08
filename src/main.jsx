@@ -10,37 +10,39 @@ function Root() {
     var _s2 = useState(null), account = _s2[0], setAccount = _s2[1];
     var _s3 = useState(false), signInLoading = _s3[0], setSignInLoading = _s3[1];
     var _s4 = useState(null), error = _s4[0], setError = _s4[1];
+    var _s5 = useState(true), initializing = _s5[0], setInitializing = _s5[1];
 
-    // Load MSAL in background and check for redirect response
+    // Initialize MSAL and check for redirect/existing session
     useEffect(function() {
         getMsalInstance()
             .then(function(instance) {
                 setMsalRef(instance);
-                // Check if user is already signed in (from redirect or session)
                 var active = instance.getActiveAccount();
                 if (active) {
+                    // Auto-create session for App.jsx's Auth system
+                    var session = { u: active.username, name: active.name || active.username, at: Date.now() };
+                    localStorage.setItem("sla_session", JSON.stringify(session));
                     setAccount(active);
                 }
+                setInitializing(false);
             })
             .catch(function(err) {
-                console.warn("MSAL background init:", err.message);
+                console.warn("MSAL init:", err.message);
+                setInitializing(false);
             });
     }, []);
 
-    // Sign in handler — uses REDIRECT (not popup) for reliability
+    // Sign in — redirect to Microsoft
     var handleSignIn = function() {
         if (signInLoading) return;
         setSignInLoading(true);
         setError(null);
 
         function doLogin(instance) {
-            // loginRedirect will navigate away from the page to Microsoft login
-            // When done, it comes back and handleRedirectPromise in authConfig picks it up
             instance.loginRedirect(loginRequest).catch(function(err) {
                 setSignInLoading(false);
                 if (err && err.errorCode === "user_cancelled") return;
                 setError("Sign in failed: " + (err && err.message ? err.message : "Unknown error"));
-                console.error("Login error:", err);
             });
         }
 
@@ -59,7 +61,18 @@ function Root() {
         }
     };
 
-    // Always show landing page if not signed in
+    // Show nothing while checking for redirect response
+    if (initializing) {
+        return React.createElement("div", {
+            style: {
+                background: "#0d0f14", color: "#5a5e72", minHeight: "100vh",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 14,
+            }
+        }, "Loading...");
+    }
+
+    // Not signed in → landing page
     if (!account) {
         return React.createElement(LandingPage, {
             onSignIn: handleSignIn,
@@ -68,10 +81,8 @@ function Root() {
         });
     }
 
-    return React.createElement(App, {
-        msalAccount: account,
-        msalInstance: msalRef,
-    });
+    // Signed in → go straight to App (which will find the sla_session we set)
+    return React.createElement(App, null);
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
