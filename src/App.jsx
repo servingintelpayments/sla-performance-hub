@@ -400,19 +400,19 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   const casesCreatedBy = await safeFetchCount("Cases Created",
     `incidents?$filter=(_createdby_value eq ${oid} or _createdonbehalfof_value eq ${oid}) and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
-  // DEBUG: Log raw case data to find why Cases Created count is off
+  // DEBUG: capture raw case data
+  let debugInfo = "";
   try {
     const debugData = await d365Fetch(
       `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,_createdby_value,_createdonbehalfof_value,_ownerid_value,createdon&$top=50`
     );
-    console.log(`[DEBUG] ${member.name} — All owned cases in range:`, debugData.value?.length);
-    (debugData.value || []).forEach((c, i) => {
-      console.log(`  Case ${i+1}: "${c.title}" | createdby=${c._createdby_value} | onbehalfof=${c._createdonbehalfof_value} | owner=${c._ownerid_value} | created=${c.createdon}`);
+    const cases = debugData.value || [];
+    debugInfo = `DEBUG: ${cases.length} owned cases | OID: ${oid}\n`;
+    cases.forEach((c, i) => {
+      debugInfo += `#${i+1} "${c.title}" createdby=${c._createdby_value} onbehalf=${c._createdonbehalfof_value}\n`;
     });
-    console.log(`  Agent OID: ${oid}`);
-    console.log(`  Cases where createdby matches: ${(debugData.value || []).filter(c => c._createdby_value === oid).length}`);
-    console.log(`  Cases where onbehalfof matches: ${(debugData.value || []).filter(c => c._createdonbehalfof_value === oid).length}`);
-  } catch(e) { console.log("[DEBUG] Error:", e.message); }
+    debugInfo += `createdby match: ${cases.filter(c => c._createdby_value === oid).length} | onbehalf match: ${cases.filter(c => c._createdonbehalfof_value === oid).length}`;
+  } catch(e) { debugInfo = "DEBUG ERROR: " + e.message; }
 
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
     `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
@@ -495,6 +495,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     csatResponses, csatAvg,
     avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
     errors,
+    debugInfo,
   };
 }
 
@@ -1005,6 +1006,7 @@ function MemberSection({ memberData, index }) {
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
         <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
+      {d.debugInfo && <div style={{ background: "#1a1a2e", color: "#00ff88", padding: "12px 16px", borderRadius: 8, fontSize: 11, fontFamily: "'Space Mono', monospace", whiteSpace: "pre-wrap", marginBottom: 12, lineHeight: 1.6 }}>{d.debugInfo}</div>}
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
