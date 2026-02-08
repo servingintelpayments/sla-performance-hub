@@ -170,7 +170,7 @@ const C = {
   orange: "#FF9800", orangeLight: "#fff3e0", blue: "#2196F3", blueLight: "#e3f2fd",
   purple: "#9C27B0", purpleLight: "#f3e5f5", gold: "#FFC107", goldLight: "#fff8e1",
   yellow: "#E6B422", gray: "#9e9e9e", grayLight: "#f5f5f5",
-  bg: "#F4F1EC", card: "#FFFFFF", border: "#E2DDD5",
+  bg: "#F4F1EC", card: "#F4F1EC", border: "#E2DDD5",
   textDark: "#1B2A4A", textMid: "#5A6578", textLight: "#8B95A5",
   d365: "#0078D4",
 };
@@ -775,7 +775,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
   if (noTarget) {
     const displayVal = isNA ? "N/A" : (typeof value === "string" ? value : `${value}${unit || ""}`);
     return (
-      <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden",  }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
         </div>
@@ -795,7 +795,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
   const displayVal = isNA ? "N/A" : `${value}${unit || ""}`;
 
   return (
-    <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+    <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden",  }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
         <div style={{ padding: "3px 10px", borderRadius: 10, background: pillColor, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>{met === null ? "N/A" : met ? "Met" : "Miss"}</div>
@@ -813,7 +813,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
 
 function StatCard({ label, value, sub, color }) {
   return (
-    <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: "none", padding: "14px 16px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+    <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: "none", padding: "14px 16px", textAlign: "center",  }}>
       <div style={{ fontSize: 10, fontWeight: 600, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 28, fontWeight: 800, color: color || C.textDark, fontFamily: "'Space Mono', monospace", lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>{sub}</div>}
@@ -883,7 +883,7 @@ function TierSection({ tier, data, members }) {
           </div>
         );
         return (<>
-          <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px",  }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📞</span> PHONE METRICS</div>
             <MR icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
             <MR icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
@@ -892,7 +892,7 @@ function TierSection({ tier, data, members }) {
             <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
           {data.email && (
-            <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+            <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px",  }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: C.blue, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📧</span> EMAIL METRICS</div>
               <MR icon="📨" label="Total Email Cases" value={data.email.total ?? 0} accent={C.textDark} />
               <MR icon="💬" label="Responded" value={data.email.responded ?? 0} accent={C.orange} badge={(data.email.responded ?? 0) > 0 ? "miss" : "met"} />
@@ -994,7 +994,7 @@ function MemberSection({ memberData, index }) {
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
       </div>
       {isTier1 && (
-        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px",  }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📞</span> Phone Activity</div>
           <PhoneStat icon="📞" label="Total Calls" value={d.totalPhoneCalls ?? 0} accent={C.textDark} />
           <PhoneStat icon="✅" label="Answered Calls" value={d.answeredLive ?? 0} accent="#2D9D78" />
@@ -1045,19 +1045,19 @@ function ChartsPanel({ data }) {
   const interval = Math.max(0, Math.floor(tl.length / 8));
   return (
     <div className="chart-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📊 Daily Cases by Tier</div>
         <ResponsiveContainer width="100%" height={220}><BarChart data={tl}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} /><Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} /></BarChart></ResponsiveContainer>
       </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📈 SLA Compliance Trend</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📞 Daily Call Volume</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>⭐ CSAT Score Trend</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
@@ -1363,23 +1363,6 @@ function Dashboard({ user, onLogout }) {
               {selectedMembers.slice(0, 4).map((id) => { const m = teamMembers.find((t) => t.id === id); const idx = teamMembers.indexOf(m); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: PIE_COLORS[idx % PIE_COLORS.length] + "18", color: PIE_COLORS[idx % PIE_COLORS.length], fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setSelectedMembers(selectedMembers.filter((s) => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
               {selectedMembers.length > 4 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: C.bg, color: C.textLight, fontWeight: 600 }}>+{selectedMembers.length - 4} more</span>}
             </div>}
-          </div>
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>📊</span> Report Type</div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {[["daily", "📋 Daily"], ["weekly", "📅 Weekly"]].map(([v, l]) => (
-                <button key={v} onClick={() => setPreset(v)} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${reportType === v ? C.accent : C.border}`, background: reportType === v ? C.accent + "10" : C.bg, color: reportType === v ? C.accent : C.textMid, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{l}</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ marginBottom: 18, background: C.bg, borderRadius: 10, padding: "12px 14px", border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Queue Tiers</div>
-            {Object.values(TIERS).map((t) => (
-              <div key={t.code} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "4px 0" }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
-                <div><div style={{ fontSize: 11, fontWeight: 600, color: C.textDark }}>{t.icon} {t.label} — {t.name}</div><div style={{ fontSize: 9, color: C.textLight, lineHeight: 1.3 }}>{t.desc}</div></div>
-              </div>
-            ))}
           </div>
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><span>📅</span> Date Range</div>
