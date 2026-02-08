@@ -90,6 +90,19 @@ function getMsalAccount() {
   } catch { return null; }
 }
 
+/* ─── TIMEZONE: Convert Central Time to UTC (CT = UTC-6, CDT = UTC-5) ─── */
+const CT_OFFSET_HOURS = 6; // CST; change to 5 for CDT
+function ctToUTC(dateStr, timeStr, endOfMinute = false) {
+  // dateStr = "2026-02-07", timeStr = "00:00" or "23:59"
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  const [h, m] = (timeStr || "00:00").split(":").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d, h + CT_OFFSET_HOURS, m, endOfMinute ? 59 : 0));
+  const pad = (n) => String(n).padStart(2, "0");
+  const utcDate = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+  const utcTime = `${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}Z`;
+  return { date: utcDate, time: utcTime };
+}
+
 /* ─── D365 API HELPER ─── */
 async function d365Fetch(query) {
   const token = await getD365Token();
@@ -359,8 +372,9 @@ function generateDemoData(startDate, endDate, selectedMembers) {
    ═══════════════════════════════════════════════════════ */
 
 async function fetchMemberD365Data(member, startDate, endDate, onProgress, startTime, endTime) {
-  const s = startDate, e = endDate;
-  const sT = (startTime || "00:00") + ":00Z", eT = (endTime || "23:59") + ":59Z";
+  const utcStart = ctToUTC(startDate, startTime || "00:00", false);
+  const utcEnd = ctToUTC(endDate, endTime || "23:59", true);
+  const s = utcStart.date, sT = utcStart.time, e = utcEnd.date, eT = utcEnd.time;
   const oid = member.id;
   const errors = [];
   const progress = (msg) => onProgress?.(`${member.name}: ${msg}`);
@@ -400,22 +414,18 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   const casesCreatedBy = await safeFetchCount("Cases Created",
     `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
-  // DEBUG: dump raw case data to see all available fields
+  // DEBUG: dump raw case data
   let debugInfo = "";
   try {
     const debugData = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,_createdby_value,_ownerid_value,createdon&$top=10`
+      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$top=10`
     );
     const cases = debugData.value || [];
-    debugInfo = `OID: ${oid} | Owned cases: ${cases.length}\n`;
+    debugInfo = `OID: ${oid} | UTC range: ${s}T${sT} to ${e}T${eT} | Owned: ${cases.length}\n`;
     cases.forEach((c, i) => {
       debugInfo += `#${i+1} "${c.title}" | createdby=${c._createdby_value} | match=${c._createdby_value === oid ? 'YES' : 'NO'}\n`;
     });
-    // Also dump all keys from first case to find the right field
-    if (cases.length > 0) {
-      debugInfo += `\nAll fields on case #1: ${Object.keys(cases[0]).join(', ')}`;
-    }
-  } catch(e) { debugInfo = "DEBUG ERROR: " + e.message; }
+  } catch(e2) { debugInfo = "DEBUG ERROR: " + e2.message; }
 
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
     `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
@@ -503,9 +513,9 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
 }
 
 async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endTime) {
-  const s = startDate;
-  const e = endDate;
-  const sT = (startTime || "00:00") + ":00Z", eT = (endTime || "23:59") + ":59Z";
+  const utcStart = ctToUTC(startDate, startTime || "00:00", false);
+  const utcEnd = ctToUTC(endDate, endTime || "23:59", true);
+  const s = utcStart.date, sT = utcStart.time, e = utcEnd.date, eT = utcEnd.time;
   const errors = [];
   const progress = (msg) => onProgress?.(`D365: ${msg}`);
 
