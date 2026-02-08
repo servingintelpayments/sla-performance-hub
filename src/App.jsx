@@ -400,6 +400,20 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   const casesCreatedBy = await safeFetchCount("Cases Created",
     `incidents?$filter=(_createdby_value eq ${oid} or _createdonbehalfof_value eq ${oid}) and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
+  // DEBUG: Log raw case data to find why Cases Created count is off
+  try {
+    const debugData = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,_createdby_value,_createdonbehalfof_value,_ownerid_value,createdon&$top=50`
+    );
+    console.log(`[DEBUG] ${member.name} — All owned cases in range:`, debugData.value?.length);
+    (debugData.value || []).forEach((c, i) => {
+      console.log(`  Case ${i+1}: "${c.title}" | createdby=${c._createdby_value} | onbehalfof=${c._createdonbehalfof_value} | owner=${c._ownerid_value} | created=${c.createdon}`);
+    });
+    console.log(`  Agent OID: ${oid}`);
+    console.log(`  Cases where createdby matches: ${(debugData.value || []).filter(c => c._createdby_value === oid).length}`);
+    console.log(`  Cases where onbehalfof matches: ${(debugData.value || []).filter(c => c._createdonbehalfof_value === oid).length}`);
+  } catch(e) { console.log("[DEBUG] Error:", e.message); }
+
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
     `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
   const answeredLive = await safeFetchCount("Answered Calls",
