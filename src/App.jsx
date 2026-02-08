@@ -90,14 +90,26 @@ function getMsalAccount() {
   } catch { return null; }
 }
 
-/* ─── TIMEZONE: Convert Central Time to UTC (CT = UTC-6, CDT = UTC-5) ─── */
-const CT_OFFSET_HOURS = 6; // CST; change to 5 for CDT
+/* ─── TIMEZONE: Convert Central Time to UTC (auto-detects CST/CDT) ─── */
 function ctToUTC(dateStr, timeStr, endOfMinute = false) {
-  // dateStr = "2026-02-07", timeStr = "00:00" or "23:59"
-  const [y, mo, d] = dateStr.split("-").map(Number);
-  const [h, m] = (timeStr || "00:00").split(":").map(Number);
-  const dt = new Date(Date.UTC(y, mo - 1, d, h + CT_OFFSET_HOURS, m, endOfMinute ? 59 : 0));
   const pad = (n) => String(n).padStart(2, "0");
+  const [h, m] = (timeStr || "00:00").split(":").map(Number);
+  const sec = endOfMinute ? 59 : 0;
+  const [y, mo, d] = dateStr.split("-").map(Number);
+
+  // Auto-detect DST: CDT (UTC-5) or CST (UTC-6)
+  // US rule: CDT starts 2nd Sunday of March at 2AM, ends 1st Sunday of November at 2AM
+  function getNthSunday(year, month, n) {
+    const firstDay = new Date(year, month, 1).getDay();
+    return 1 + ((7 - firstDay) % 7) + (n - 1) * 7;
+  }
+  const dstStart = new Date(y, 2, getNthSunday(y, 2, 2), 2, 0, 0);  // 2nd Sun March, 2:00 AM
+  const dstEnd   = new Date(y, 10, getNthSunday(y, 10, 1), 2, 0, 0); // 1st Sun Nov, 2:00 AM
+  const localProbe = new Date(y, mo - 1, d, h, m, sec);
+  const offsetHours = (localProbe >= dstStart && localProbe < dstEnd) ? 5 : 6;
+
+  // Convert CT wall clock → UTC by adding offset
+  const dt = new Date(Date.UTC(y, mo - 1, d, h + offsetHours, m, sec));
   const utcDate = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
   const utcTime = `${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}Z`;
   return { date: utcDate, time: utcTime };
@@ -1478,7 +1490,6 @@ export default function App() {
   useEffect(() => { const s = Auth.session(); if (s) setUser(s); setChecking(false); }, []);
   if (checking) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.primary, color: "#fff", fontFamily: "'DM Sans',sans-serif" }}><div style={{ textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 16, margin: "0 auto 16px", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff" }}>S</div><div style={{ fontSize: 14, color: "#ffffff60" }}>Loading...</div></div></div>;
   if (!user) {
-    // No dashboard session — clear MSAL tokens and reload to show landing page
     Auth.logout();
     sessionStorage.clear();
     window.location.reload();
