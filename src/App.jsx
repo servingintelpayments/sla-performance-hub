@@ -215,7 +215,6 @@ async function fetchD365Queues() {
 
 /* ─── FETCH QUEUE MEMBERS FROM D365 ─── */
 async function fetchD365QueueMembers(queueId) {
-  // Approach 1: queuememberships entity
   try {
     const data = await d365Fetch(
       `queues(${queueId})/queue_membership?$select=systemuserid,fullname,title,jobtitle,internalemailaddress&$filter=isdisabled eq false`
@@ -223,7 +222,6 @@ async function fetchD365QueueMembers(queueId) {
     if (data.value?.length > 0) return mapD365Users(data.value);
   } catch (e) { console.log("Approach 1 failed:", e.message); }
 
-  // Approach 2: queuememberships_association
   try {
     const data = await d365Fetch(
       `queues(${queueId})/queuemembership_association?$select=systemuserid,fullname,title,jobtitle,internalemailaddress`
@@ -231,14 +229,12 @@ async function fetchD365QueueMembers(queueId) {
     if (data.value?.length > 0) return mapD365Users(data.value);
   } catch (e) { console.log("Approach 2 failed:", e.message); }
 
-  // Approach 3: FetchXML query for queue membership
   try {
     const fetchXml = encodeURIComponent(`<fetch><entity name="systemuser"><attribute name="systemuserid"/><attribute name="fullname"/><attribute name="title"/><attribute name="jobtitle"/><attribute name="internalemailaddress"/><filter><condition attribute="isdisabled" operator="eq" value="0"/></filter><link-entity name="queuemembership" from="systemuserid" to="systemuserid" intersect="true"><link-entity name="queue" from="queueid" to="queueid"><filter><condition attribute="queueid" operator="eq" value="${queueId}"/></filter></link-entity></link-entity></entity></fetch>`);
     const data = await d365Fetch(`systemusers?fetchXml=${fetchXml}`);
     if (data.value?.length > 0) return mapD365Users(data.value);
   } catch (e) { console.log("Approach 3 failed:", e.message); }
 
-  // Approach 4: Get cases assigned to this queue and find unique owners
   try {
     const data = await d365Fetch(
       `incidents?$filter=_queueid_value eq ${queueId}&$select=_ownerid_value&$top=200`
@@ -255,7 +251,6 @@ async function fetchD365QueueMembers(queueId) {
     }
   } catch (e) { console.log("Approach 4 failed:", e.message); }
 
-  // Approach 5: Get queue items and find workers
   try {
     const data = await d365Fetch(
       `queueitems?$filter=_queueid_value eq ${queueId}&$select=_workerid_value&$top=200`
@@ -363,7 +358,6 @@ function generateDemoData(startDate, endDate, selectedMembers) {
    LIVE DATA FETCHER — D365 OData
    ═══════════════════════════════════════════════════════ */
 
-/* ─── PER-MEMBER DATA FETCH ─── */
 async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const s = startDate, e = endDate;
   const oid = member.id;
@@ -376,21 +370,19 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   }
 
   async function safeFetchCount(label, query) {
-    try { 
-      progress(label); 
+    try {
+      progress(label);
       const cleanQuery = query.replace(/&?\$count=true/g, '').replace(/&?\$top=\d+/g, '');
-      const data = await d365Fetch(`${cleanQuery}&$top=5000`); 
-      return data.value?.length ?? 0; 
+      const data = await d365Fetch(`${cleanQuery}&$top=5000`);
+      return data.value?.length ?? 0;
     }
     catch (err) { errors.push(`${member.name} — ${label}: ${err.message}`); return 0; }
   }
 
-  // Cases owned by this member
   const totalCases = await safeCount("Total Cases",
     `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const resolvedCases = await safeFetchCount("Resolved",
     `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
-  // SLA Met = Resolved cases (workflow's Get_SLA_Met_Cases uses same filter: statecode eq 1 + modifiedon)
   const slaMet = resolvedCases;
   const fcrCases = await safeFetchCount("FCR",
     `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
@@ -399,17 +391,14 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const activeCases = await safeCount("Active",
     `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 0 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
 
-  // Email cases
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const emailResolved = await safeFetchCount("Email Resolved",
     `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
-  // Cases created BY this member (vs owned/assigned)
   const casesCreatedBy = await safeCount("Cases Created",
     `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
 
-  // Phone call activity — matches tier-level logic
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
     `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes`);
   const answeredLive = await safeFetchCount("Answered Calls",
@@ -420,7 +409,6 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   const outgoingCalls = 0;
   const voicemails = abandonedCalls;
 
-  // Avg Phone AHT per member
   let memberAHT = "N/A";
   if (totalPhoneCalls > 0) {
     try {
@@ -437,7 +425,6 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
     } catch (err) { errors.push(`${member.name} — AHT: ${err.message}`); }
   }
 
-  // CSAT
   let csatResponses = 0, csatAvg = "N/A";
   try {
     progress("CSAT");
@@ -451,7 +438,6 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
     }
   } catch (err) { errors.push(`${member.name} — CSAT: ${err.message}`); }
 
-  // Avg resolution time (cases created AND resolved in range)
   let avgResTime = "N/A";
   try {
     progress("Resolution time");
@@ -497,42 +483,25 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   };
 }
 
-/* ─── GLOBAL (QUEUE-LEVEL) DATA FETCH ─── */
-
 async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const s = startDate;
   const e = endDate;
   const errors = [];
   const progress = (msg) => onProgress?.(`D365: ${msg}`);
 
-  // Helper to safely count
   async function safeCount(label, query) {
-    try {
-      progress(`Fetching ${label}...`);
-      return await d365Count(query);
-    } catch (err) {
-      errors.push(`${label}: ${err.message}`);
-      return 0;
-    }
+    try { progress(`Fetching ${label}...`); return await d365Count(query); }
+    catch (err) { errors.push(`${label}: ${err.message}`); return 0; }
   }
 
-  // Helper to safely fetch values
   async function safeFetch(label, query) {
-    try {
-      progress(`Fetching ${label}...`);
-      return await d365Fetch(query);
-    } catch (err) {
-      errors.push(`${label}: ${err.message}`);
-      return { value: [] };
-    }
+    try { progress(`Fetching ${label}...`); return await d365Fetch(query); }
+    catch (err) { errors.push(`${label}: ${err.message}`); return { value: [] }; }
   }
 
-  // Helper to fetch records and count them (like Power Automate "List rows" + length())
-  // Uses $top=5000 to get all records, counts value.length — avoids $count issues
   async function safeFetchCount(label, query) {
     try {
       progress(`Fetching ${label}...`);
-      // Remove any existing $count and add $top=5000 for reliable counting
       const cleanQuery = query.replace(/&?\$count=true/g, '').replace(/&?\$top=\d+/g, '');
       const data = await d365Fetch(`${cleanQuery}&$top=5000`);
       const count = data.value?.length ?? 0;
@@ -545,38 +514,29 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   }
 
-  // ── Tier 1 queries ──
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
-
-  // SLA Met: matches workflow's Get_SLA_Met_Cases — Tier 1 resolved cases only
   const t1SLAMet = await safeFetchCount("SLA Met Cases",
     `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
-
-  // FCR: matches workflow's Get_FCR_Cases — Tier 1 FCR only
   const t1FCR = await safeFetchCount("FCR Cases",
     `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
-
   const t1Escalated = await safeCount("Tier 1 Escalated",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
-  // ── Tier 2 queries ──
   const t2Cases = await safeCount("Tier 2 Cases",
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t2Resolved = await safeFetchCount("Tier 2 Resolved",
     `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
-  const t2SLAMet = t2Resolved; // Same as workflow: resolved = SLA met
+  const t2SLAMet = t2Resolved;
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
-  // ── Tier 3 queries ──
   const t3Cases = await safeCount("Tier 3 Cases",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
   const t3Resolved = await safeFetchCount("Tier 3 Resolved",
     `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
-  const t3SLAMet = t3Resolved; // Same as workflow: resolved = SLA met
+  const t3SLAMet = t3Resolved;
 
-  // ── Email queries ──
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
   const emailResponded = await safeCount("Email Responded",
@@ -584,7 +544,6 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const emailResolved = await safeFetchCount("Email Resolved",
     `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
 
-  // ── CSAT queries ──
   const csatResponses = await safeCount("CSAT Responses",
     `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
 
@@ -601,12 +560,9 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
           csatAvg = +(scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
         }
       }
-    } catch (err) {
-      errors.push(`CSAT Scores: ${err.message}`);
-    }
+    } catch (err) { errors.push(`CSAT Scores: ${err.message}`); }
   }
 
-  // ── Resolution time (Tier 1 resolved cases only — created AND resolved in range) ──
   let avgResTime = "N/A";
   try {
     progress("Fetching resolution times...");
@@ -614,11 +570,9 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
       `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
-      // Try cr7fe_new_handletime first (could be minutes or seconds — try both)
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
       if (handleTimes.length > 0) {
         const avgRaw = handleTimes.reduce((a, b) => a + b, 0) / handleTimes.length;
-        // If avg > 1000, likely stored in seconds — convert to minutes
         const avgMin = avgRaw > 1000 ? avgRaw / 60 : avgRaw;
         if (avgMin >= 60) {
           const h = Math.floor(avgMin / 60);
@@ -628,40 +582,28 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
           avgResTime = `${Math.round(avgMin)} min`;
         }
       } else {
-        // Fallback: diff createdon → modifiedon (only cases created in range, so diff is reasonable)
         const times = resolved.value.map(r => {
           const created = new Date(r.createdon);
           const modified = new Date(r.modifiedon);
           return (modified - created) / (1000 * 60 * 60);
-        }).filter(h => h >= 0 && h < 168); // cap at 7 days
+        }).filter(h => h >= 0 && h < 168);
         if (times.length > 0) {
           const avg = times.reduce((a, b) => a + b, 0) / times.length;
-          if (avg < 1) {
-            avgResTime = `${Math.round(avg * 60)} min`;
-          } else {
-            avgResTime = `${avg.toFixed(1)} hrs`;
-          }
+          if (avg < 1) { avgResTime = `${Math.round(avg * 60)} min`; }
+          else { avgResTime = `${avg.toFixed(1)} hrs`; }
         }
       }
     }
-  } catch (err) {
-    errors.push(`Resolution time: ${err.message}`);
-  }
+  } catch (err) { errors.push(`Resolution time: ${err.message}`); }
 
-  // ── Phone call activity (matches flow exactly) ──
-  // Get Phone Calls - ALL calls, selects actualdurationminutes,ownerid (matches flow)
   const phoneTotal = await safeFetchCount("Phone Total",
     `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes`);
-  // Get Answered Calls - actualdurationminutes gt 0
   const phoneAnswered = await safeFetchCount("Phone Answered",
     `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=actualdurationminutes`);
-  // Get Abandoned Calls - actualdurationminutes eq 0
   const phoneAbandoned = await safeFetchCount("Phone Abandoned",
     `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=actualdurationminutes`);
-  // Answer Rate
   const phoneAnswerRate = phoneTotal > 0 ? Math.round(phoneAnswered / phoneTotal * 100) : 0;
 
-  // Avg Phone AHT - average actualdurationminutes across ALL calls (matches flow)
   let phoneAHT = "N/A";
   try {
     progress("Fetching Phone AHT...");
@@ -677,7 +619,6 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     }
   } catch (err) { errors.push(`Phone AHT: ${err.message}`); }
 
-  // ── Build timeline for charts (multi-day ranges) ──
   let timelineData = [];
   try {
     const startD = new Date(s); const endD = new Date(e);
@@ -733,28 +674,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   const allResolved = t1SLAMet + t2Resolved + t3Resolved;
 
   return {
-    tier1: {
-      total: t1Cases, slaMet: t1SLAMet,
-      slaCompliance: t1Cases ? Math.round(t1SLAMet / t1Cases * 100) : 0,
-      fcrRate: t1Cases ? Math.round(t1FCR / t1Cases * 100) : 0,
-      escalationRate: t1Cases ? Math.round(t1Escalated / t1Cases * 100) : 0,
-      avgResolutionTime: avgResTime, escalated: t1Escalated,
-    },
-    tier2: {
-      total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet,
-      slaCompliance: t2Resolved ? Math.round(t2SLAMet / t2Resolved * 100) : "N/A",
-      escalationRate: t2Cases ? Math.round(t2Escalated / t2Cases * 100) : "N/A",
-      escalated: t2Escalated,
-    },
-    tier3: {
-      total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet,
-      slaCompliance: t3Resolved ? Math.round(t3SLAMet / t3Resolved * 100) : "N/A",
-    },
-    email: {
-      total: emailCases, responded: emailResponded, resolved: emailResolved,
-      // Workflow workaround: resolvebyslastatus not updating, so treat resolved as 100% SLA
-      slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A"),
-    },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.round(t1SLAMet / t1Cases * 100) : 0, fcrRate: t1Cases ? Math.round(t1FCR / t1Cases * 100) : 0, escalationRate: t1Cases ? Math.round(t1Escalated / t1Cases * 100) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.round(t2SLAMet / t2Resolved * 100) : "N/A", escalationRate: t2Cases ? Math.round(t2Escalated / t2Cases * 100) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.round(t3SLAMet / t3Resolved * 100) : "N/A" },
+    email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A") },
     csat: { responses: csatResponses, avgScore: csatAvg },
     phone: { totalCalls: phoneTotal, incoming: phoneTotal, outgoing: 0, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: 0, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
     overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: phoneAnswered, abandonedCalls: phoneAbandoned },
@@ -766,11 +689,8 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
 
 async function fetchLiveData(config, startDate, endDate, onProgress) {
   const progress = (msg) => onProgress?.(msg);
-
-  // Fetch D365 data (cases, SLA, CSAT, phone calls — all from D365)
   progress("Connecting to Dynamics 365...");
   const d365Data = await fetchLiveD365Data(startDate, endDate, progress);
-
   progress("Compiling report...");
   return {
     ...d365Data,
@@ -780,7 +700,7 @@ async function fetchLiveData(config, startDate, endDate, onProgress) {
   };
 }
 
-/* ─── AUTH STORE (for dashboard login, separate from D365) ─── */
+/* ─── AUTH STORE ─── */
 const Auth = {
   getUsers() { try { return JSON.parse(localStorage.getItem("sla_users") || "[]"); } catch { return []; } },
   register(u, p, name) {
@@ -802,7 +722,7 @@ const Auth = {
 };
 
 /* ═══════════════════════════════════════════════════════
-   UI COMPONENTS — STATUS & METRIC DISPLAY
+   UI COMPONENTS
    ═══════════════════════════════════════════════════════ */
 
 function StatusBadge({ status, value, unit, targetLabel }) {
@@ -846,18 +766,12 @@ function CTooltip({ active, payload, label }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════
-   REPORT SECTIONS
-   ═══════════════════════════════════════════════════════ */
-
-/* ─── PROGRESS BAR METRIC CARD ─── */
 function MetricCard({ label, value, target, unit, inverse, color }) {
   const numVal = parseFloat(value);
   const numTarget = parseFloat(target);
   const isNA = value === "N/A" || (typeof value === "string" && value === "N/A") || (typeof value !== "string" && isNaN(numVal));
   const noTarget = target === null || target === undefined;
 
-  // Display-only mode (no target comparison, e.g. Avg Resolution Time)
   if (noTarget) {
     const displayVal = isNA ? "N/A" : (typeof value === "string" ? value : `${value}${unit || ""}`);
     return (
@@ -897,7 +811,6 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
   );
 }
 
-/* ─── STAT CARD (summary row) ─── */
 function StatCard({ label, value, sub, color }) {
   return (
     <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: `1.5px solid ${C.border}`, padding: "14px 16px", textAlign: "center" }}>
@@ -908,7 +821,6 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-/* ─── TIER SECTION — New visual with progress bar cards ─── */
 function TierSection({ tier, data, members }) {
   const t = TIERS[tier]; if (!t) return null;
   const d = data[`tier${tier}`]; if (!d) return null;
@@ -916,29 +828,20 @@ function TierSection({ tier, data, members }) {
   const slaRate = d.slaCompliance;
   const slaMet = d.slaMet || 0;
   const slaMissed = Math.max(0, d.total - slaMet);
-
-  // Build metrics for this tier
   const metrics = [];
   if (t.metrics.includes("sla_compliance")) metrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%" });
   if (t.metrics.includes("fcr_rate")) metrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" });
   if (t.metrics.includes("escalation_rate")) metrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true });
   if (t.metrics.includes("avg_resolution_time")) {
     const raw = d.avgResolutionTime || "N/A";
-    // Already formatted as "Xh Ym", "X min", or "X.X hrs"
     const num = parseFloat(raw);
-    const isHrs = raw.includes("hrs");
-    const isMin = raw.includes("min") && !raw.includes("h");
     metrics.push({ label: "Avg Resolution Time", value: isNaN(num) ? "N/A" : raw, target: null, unit: "", rawDisplay: true });
   }
-  // Add CSAT if tier 1
   if (tier === 1 && data.csat) {
-    const csatPct = data.csat.avgScore !== "N/A" ? Math.round(data.csat.avgScore / 5 * 100) : "N/A";
     metrics.push({ label: "CSAT Score", value: data.csat.avgScore, target: 4.0, unit: "/5" });
   }
-
   return (
     <div style={{ marginBottom: 24 }}>
-      {/* Tier Header */}
       <div style={{ background: `linear-gradient(135deg, ${t.color}, ${t.colorDark})`, borderRadius: "14px 14px 0 0", padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#fff" }}>{t.label} {t.name}</h3>
@@ -953,8 +856,6 @@ function TierSection({ tier, data, members }) {
           </div>
         )}
       </div>
-
-      {/* Summary Stats Row */}
       <div style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
         <StatCard label={`${t.label} SLA Rate`} value={slaRate === "N/A" ? "N/A" : `${slaRate}%`} color={slaRate !== "N/A" && slaRate >= 90 ? "#2D9D78" : "#E5544B"} />
         <StatCard label="SLAs Met" value={`${slaMet}/${d.total}`} color="#2D9D78" />
@@ -962,28 +863,19 @@ function TierSection({ tier, data, members }) {
         <StatCard label="Total Cases" value={d.total} color={t.colorDark} />
         <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
       </div>
-
-      {/* Metric Cards Grid */}
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>{t.label} SLA Status — All Metrics</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {metrics.map((m, i) => (
-          <MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />
-        ))}
+        {metrics.map((m, i) => (<MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />))}
       </div>
-
-      {/* Phone Metrics — Tier 1 only */}
       {tier === 1 && data.phone && (() => {
         const totalCalls = data.phone.totalCalls ?? 0;
         const answered = data.phone.answered ?? 0;
         const abandoned = data.phone.abandoned ?? 0;
         const answerRate = data.phone.answerRate ?? 0;
         const avgAHT = data.phone.avgAHT ?? "N/A";
-        const MetricRow = ({ icon, label, value, accent, badge }) => (
+        const MR = ({ icon, label, value, accent, badge }) => (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 15 }}>{icon}</span>
-              <span style={{ fontSize: 13, color: C.textMid }}>{label}</span>
-            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 15 }}>{icon}</span><span style={{ fontSize: 13, color: C.textMid }}>{label}</span></div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 18, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
               {badge && <span style={{ fontSize: 11, width: 18, height: 18, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: badge === "met" ? "#2D9D78" : "#E5544B", color: "#fff" }}>{badge === "met" ? "✓" : "!"}</span>}
@@ -992,25 +884,19 @@ function TierSection({ tier, data, members }) {
         );
         return (<>
           <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 18 }}>📞</span> PHONE METRICS
-            </div>
-            <MetricRow icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
-            <MetricRow icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
-            <MetricRow icon="❌" label="Abandoned Calls" value={abandoned} accent="#E5544B" badge={abandoned > 0 ? "miss" : "met"} />
-            <MetricRow icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
-            <MetricRow icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📞</span> PHONE METRICS</div>
+            <MR icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
+            <MR icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
+            <MR icon="❌" label="Abandoned Calls" value={abandoned} accent="#E5544B" badge={abandoned > 0 ? "miss" : "met"} />
+            <MR icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
+            <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
-
-          {/* Email Metrics */}
           {data.email && (
             <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.blue, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 18 }}>📧</span> EMAIL METRICS
-              </div>
-              <MetricRow icon="📨" label="Total Email Cases" value={data.email.total ?? 0} accent={C.textDark} />
-              <MetricRow icon="💬" label="Responded" value={data.email.responded ?? 0} accent={C.orange} badge={(data.email.responded ?? 0) > 0 ? "miss" : "met"} />
-              <MetricRow icon="✅" label="Resolved" value={data.email.resolved ?? 0} accent="#2D9D78" badge="met" />
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.blue, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📧</span> EMAIL METRICS</div>
+              <MR icon="📨" label="Total Email Cases" value={data.email.total ?? 0} accent={C.textDark} />
+              <MR icon="💬" label="Responded" value={data.email.responded ?? 0} accent={C.orange} badge={(data.email.responded ?? 0) > 0 ? "miss" : "met"} />
+              <MR icon="✅" label="Resolved" value={data.email.resolved ?? 0} accent="#2D9D78" badge="met" />
             </div>
           )}
         </>);
@@ -1032,12 +918,7 @@ function OverallSummary({ data }) {
     <div style={{ background: C.primary, padding: "24px 28px", borderRadius: 14, marginBottom: 4 }}>
       <h3 style={{ margin: "0 0 20px", color: "#fff", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📈 OVERALL SUMMARY</h3>
       <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 12 }}>
-        {items.map((it) => (
-          <div key={it.label} style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div>
-            <div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div>
-          </div>
-        ))}
+        {items.map((it) => (<div key={it.label} style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div><div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div></div>))}
       </div>
     </div>
   );
@@ -1067,7 +948,6 @@ function Definitions() {
   );
 }
 
-/* ─── MEMBER SECTION — Individual agent report card ─── */
 function MemberSection({ memberData, index }) {
   const d = memberData;
   const m = d.member;
@@ -1077,8 +957,6 @@ function MemberSection({ memberData, index }) {
   const colorDark = color + "DD";
   const slaMet = d.slaMet || 0;
   const slaMissed = Math.max(0, d.totalCases - slaMet);
-
-  // Tier 1: full metrics | Tier 2/3: SLA + Escalation + Resolution Time only
   const metrics = isTier1 ? [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
@@ -1090,31 +968,20 @@ function MemberSection({ memberData, index }) {
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
   ];
-
   const PhoneStat = ({ icon, label, value, accent }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 16 }}>{icon}</span>
-        <span style={{ fontSize: 13, color: C.textMid }}>{label}</span>
-      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 16 }}>{icon}</span><span style={{ fontSize: 13, color: C.textMid }}>{label}</span></div>
       <span style={{ fontSize: 18, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
     </div>
   );
-
   return (
     <div style={{ marginBottom: 24 }}>
-      {/* Member Header */}
       <div style={{ background: `linear-gradient(135deg, ${color}, ${colorDark})`, borderRadius: "14px 14px 0 0", padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>{m.avatar}</div>
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{m.name}</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div>
-          </div>
+          <div><div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{m.name}</div><div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div></div>
         </div>
       </div>
-
-      {/* Summary Stats */}
       <div style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
         <StatCard label="Cases Owned" value={d.totalCases} color={color} />
         <StatCard label="Cases Created" value={d.casesCreatedBy ?? "—"} color={C.blue} />
@@ -1122,21 +989,13 @@ function MemberSection({ memberData, index }) {
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
         <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
-
-      {/* Performance Metric Cards */}
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {metrics.map((mt, i) => (
-          <MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />
-        ))}
+        {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
       </div>
-
-      {/* Phone Activity Section — Tier 1 only */}
       {isTier1 && (
         <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: `1.5px solid ${C.border}`, padding: "18px 20px" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>📞</span> Phone Activity
-          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📞</span> Phone Activity</div>
           <PhoneStat icon="📞" label="Total Calls" value={d.totalPhoneCalls ?? 0} accent={C.textDark} />
           <PhoneStat icon="✅" label="Answered Calls" value={d.answeredLive ?? 0} accent="#2D9D78" />
           <PhoneStat icon="❌" label="Abandoned Calls" value={d.voicemails ?? 0} accent="#E5544B" />
@@ -1147,21 +1006,15 @@ function MemberSection({ memberData, index }) {
   );
 }
 
-/* ─── TEAM SUMMARY — aggregated from member data ─── */
 function TeamSummary({ memberDataList }) {
   const totals = memberDataList.reduce((acc, d) => ({
-    totalCases: acc.totalCases + d.totalCases,
-    resolved: acc.resolved + d.resolvedCases,
-    active: acc.active + d.activeCases,
-    escalated: acc.escalated + d.escalatedCases,
-    slaMet: acc.slaMet + d.slaMet,
-    fcrCases: acc.fcrCases + d.fcrCases,
-    emailCases: acc.emailCases + d.emailCases,
-    emailResolved: acc.emailResolved + d.emailResolved,
+    totalCases: acc.totalCases + d.totalCases, resolved: acc.resolved + d.resolvedCases,
+    active: acc.active + d.activeCases, escalated: acc.escalated + d.escalatedCases,
+    slaMet: acc.slaMet + d.slaMet, fcrCases: acc.fcrCases + d.fcrCases,
+    emailCases: acc.emailCases + d.emailCases, emailResolved: acc.emailResolved + d.emailResolved,
     csatResponses: acc.csatResponses + d.csatResponses,
     csatTotal: acc.csatTotal + (d.csatAvg !== "N/A" ? d.csatAvg * d.csatResponses : 0),
   }), { totalCases: 0, resolved: 0, active: 0, escalated: 0, slaMet: 0, fcrCases: 0, emailCases: 0, emailResolved: 0, csatResponses: 0, csatTotal: 0 });
-
   const items = [
     { label: "Total Cases", value: totals.totalCases, color: "#4FC3F7" },
     { label: "Resolved", value: totals.resolved, color: "#81C784" },
@@ -1169,41 +1022,23 @@ function TeamSummary({ memberDataList }) {
     { label: "Escalated", value: totals.escalated, color: totals.escalated > 0 ? "#f44336" : "#81C784" },
     { label: "SLA Met", value: totals.slaMet, color: "#81C784" },
   ];
-
   return (
     <div style={{ background: C.primary, padding: "24px 28px", borderRadius: 14, marginBottom: 16 }}>
       <h3 style={{ margin: "0 0 20px", color: "#fff", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📈 TEAM SUMMARY — {memberDataList.length} Member{memberDataList.length > 1 ? "s" : ""}</h3>
       <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 12 }}>
-        {items.map((it) => (
-          <div key={it.label} style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div>
-            <div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div>
-          </div>
-        ))}
+        {items.map((it) => (<div key={it.label} style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div><div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div></div>))}
       </div>
       {totals.totalCases > 0 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ textAlign: "center" }}>
-            <StatusBadge status={checkTarget("sla_compliance", totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0} unit="%" />
-            <div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <StatusBadge status={checkTarget("fcr_rate", totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0} unit="%" />
-            <div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team FCR</div>
-          </div>
-          {totals.csatResponses > 0 && <div style={{ textAlign: "center" }}>
-            <StatusBadge status={checkTarget("csat_score", +(totals.csatTotal / totals.csatResponses).toFixed(1))} value={+(totals.csatTotal / totals.csatResponses).toFixed(1)} unit="/5" />
-            <div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team CSAT</div>
-          </div>}
+          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("sla_compliance", totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.slaMet / totals.totalCases * 100) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div></div>
+          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("fcr_rate", totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0)} value={totals.totalCases ? Math.round(totals.fcrCases / totals.totalCases * 100) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team FCR</div></div>
+          {totals.csatResponses > 0 && <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("csat_score", +(totals.csatTotal / totals.csatResponses).toFixed(1))} value={+(totals.csatTotal / totals.csatResponses).toFixed(1)} unit="/5" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team CSAT</div></div>}
         </div>
       )}
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════
-   CHARTS PANEL
-   ═══════════════════════════════════════════════════════ */
 function ChartsPanel({ data }) {
   const tl = data.timeline;
   if (!tl || tl.length < 2) return null;
@@ -1212,35 +1047,23 @@ function ChartsPanel({ data }) {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📊 Daily Cases by Tier</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={tl}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} /><Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} /></BarChart>
-        </ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={220}><BarChart data={tl}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} /><Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} /></BarChart></ResponsiveContainer>
       </div>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📈 SLA Compliance Trend</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={tl}><defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} /></AreaChart>
-        </ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📞 Daily Call Volume</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={tl}><defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} /></AreaChart>
-        </ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
       <div style={{ background: C.card, borderRadius: 14, padding: 20, border: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>⭐ CSAT Score Trend</div>
-        <ResponsiveContainer width="100%" height={220}>
-          <AreaChart data={tl}><defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} /></AreaChart>
-        </ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>
     </div>
   );
 }
-
-/* ═══════════════════════════════════════════════════════
-   SIDEBAR — MULTI MEMBER SELECT
-   ═══════════════════════════════════════════════════════ */
 
 function MultiMemberSelect({ selected, onChange, members }) {
   const [open, setOpen] = useState(false);
@@ -1253,7 +1076,6 @@ function MultiMemberSelect({ selected, onChange, members }) {
   const filtered = members.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
   const allSelected = selected.length === members.length;
   const displayText = selected.length === 0 ? "Select team members..." : selected.length === members.length ? "All Team Members" : selected.length <= 2 ? selected.map((id) => members.find((m) => m.id === id)?.name).join(", ") : `${selected.length} members selected`;
-
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={() => { setOpen(!open); setSearch(""); }} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${open ? C.accent : C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: selected.length ? C.textDark : C.textLight, cursor: "pointer", outline: "none", display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left" }}>
@@ -1278,10 +1100,7 @@ function MultiMemberSelect({ selected, onChange, members }) {
               <button key={m.id} onClick={() => toggle(m.id)} style={{ width: "100%", padding: "9px 14px", border: "none", background: checked ? C.primary + "08" : "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, fontSize: 13, fontFamily: "'DM Sans', sans-serif", color: C.textDark }} onMouseEnter={(e) => e.currentTarget.style.background = C.bg} onMouseLeave={(e) => e.currentTarget.style.background = checked ? C.primary + "08" : "transparent"}>
                 <span style={{ width: 18, height: 18, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", border: checked ? `2px solid ${C.accent}` : `2px solid ${C.border}`, background: checked ? C.accent : "transparent", color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{checked ? "✓" : ""}</span>
                 <div style={{ width: 28, height: 28, borderRadius: 7, background: `linear-gradient(135deg, ${PIE_COLORS[idx % PIE_COLORS.length]}, ${PIE_COLORS[(idx + 2) % PIE_COLORS.length]})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{m.avatar}</div>
-                <div style={{ textAlign: "left" }}>
-                  <div style={{ fontWeight: 500, display: "flex", alignItems: "center", gap: 5 }}>{m.name}<span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (t?.color || C.blue) + "22", color: t?.color || C.blue }}>T{m.tier}</span></div>
-                  <div style={{ fontSize: 10, color: C.textLight }}>{m.role}</div>
-                </div>
+                <div style={{ textAlign: "left" }}><div style={{ fontWeight: 500, display: "flex", alignItems: "center", gap: 5 }}>{m.name}<span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: (t?.color || C.blue) + "22", color: t?.color || C.blue }}>T{m.tier}</span></div><div style={{ fontSize: 10, color: C.textLight }}>{m.role}</div></div>
               </button>
             ); })}
           </div>
@@ -1291,52 +1110,32 @@ function MultiMemberSelect({ selected, onChange, members }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════
-   CONNECTION BAR
-   ═══════════════════════════════════════════════════════ */
 function ConnectionBar({ d365Connected, isLive, onOpenSettings }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 28px", background: C.card, borderBottom: `1px solid ${C.border}`, fontSize: 11 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
         <span style={{ fontWeight: 600, color: C.textLight, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>Data Sources</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Connected ? C.green : C.accent }} />
-          <span style={{ fontWeight: 600, color: d365Connected ? C.green : C.accent }}>D365</span>
-          <span style={{ color: C.textLight }}>{d365Connected ? "Connected" : "Not connected"}</span>
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green }} />
-          <span style={{ fontWeight: 600, color: C.green }}>Live</span>
-        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Connected ? C.green : C.accent }} /><span style={{ fontWeight: 600, color: d365Connected ? C.green : C.accent }}>D365</span><span style={{ color: C.textLight }}>{d365Connected ? "Connected" : "Not connected"}</span></span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: C.green }} /><span style={{ fontWeight: 600, color: C.green }}>Live</span></span>
       </div>
       <button onClick={onOpenSettings} style={{ background: "none", border: "none", fontSize: 11, fontWeight: 600, color: C.primary, cursor: "pointer", textDecoration: "underline" }}>⚙️ Configure</button>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════
-   SETTINGS MODAL — with MSAL Sign-In
-   ═══════════════════════════════════════════════════════ */
 function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login, onD365Logout }) {
   const [local, setLocal] = useState(config);
   const [d365Status, setD365Status] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
   useEffect(() => { setLocal(config); }, [config]);
   if (!show) return null;
-  const iS = { width: "100%", padding: "10px 12px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 12, fontFamily: "'DM Sans',sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" };
-
   const handleD365SignIn = async () => {
-    setSigningIn(true);
-    setD365Status(null);
+    setSigningIn(true); setD365Status(null);
     const result = await onD365Login();
-    if (result) {
-      setD365Status({ success: true, name: result.account?.name });
-    } else {
-      setD365Status({ success: false, error: "Sign-in cancelled or failed" });
-    }
+    if (result) { setD365Status({ success: true, name: result.account?.name }); }
+    else { setD365Status({ success: false, error: "Sign-in cancelled or failed" }); }
     setSigningIn(false);
   };
-
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: C.card, borderRadius: 20, width: 660, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
@@ -1345,18 +1144,13 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: C.textLight }}>✕</button>
         </div>
         <div style={{ padding: "24px 28px" }}>
-          {/* ── D365 Section ── */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: C.d365, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>D</div>
             <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>Microsoft Dynamics 365</div><div style={{ fontSize: 10, color: C.textMid }}>servingintel.crm.dynamics.com — MSAL Authentication</div></div>
           </div>
-
           {d365Account ? (
             <div style={{ background: C.greenLight, borderRadius: 10, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.green }}>✅ Connected as {d365Account.name || d365Account.username}</div>
-                <div style={{ fontSize: 10, color: C.textMid, marginTop: 2 }}>{d365Account.username}</div>
-              </div>
+              <div><div style={{ fontSize: 13, fontWeight: 600, color: C.green }}>✅ Connected as {d365Account.name || d365Account.username}</div><div style={{ fontSize: 10, color: C.textMid, marginTop: 2 }}>{d365Account.username}</div></div>
               <button onClick={onD365Logout} style={{ padding: "6px 14px", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 11, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Disconnect</button>
             </div>
           ) : (
@@ -1365,82 +1159,13 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
                 <svg width="20" height="20" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
                 {signingIn ? "Signing in..." : "Sign in with Microsoft"}
               </button>
-              {d365Status && !d365Status.success && (
-                <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: C.redLight, color: C.red }}>❌ {d365Status.error}</div>
-              )}
+              {d365Status && !d365Status.success && (<div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: C.redLight, color: C.red }}>❌ {d365Status.error}</div>)}
             </div>
           )}
-
         </div>
         <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
           <button onClick={() => { onSave(local); onClose(); }} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: C.primary, fontSize: 13, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Save</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════
-   LOGIN PAGE
-   ═══════════════════════════════════════════════════════ */
-function LoginPage({ onLogin }) {
-  const [mode, setMode] = useState("login");
-  const [u, setU] = useState(""); const [p, setP] = useState(""); const [name, setName] = useState(""); const [cp, setCp] = useState("");
-  const [err, setErr] = useState(""); const [ok, setOk] = useState(""); const [loading, setLoading] = useState(false);
-  const [showPw, setShowPw] = useState(false); const [ready, setReady] = useState(false);
-  useEffect(() => { const s = Auth.session(); if (s) onLogin?.(s); setTimeout(() => setReady(true), 100); }, []);
-  const doLogin = async () => { setErr(""); if (!u || !p) return setErr("Fill in all fields"); setLoading(true); await new Promise(r => setTimeout(r, 600)); const res = Auth.login(u, p); setLoading(false); if (res.ok) { setOk("Welcome! Redirecting..."); setTimeout(() => onLogin?.(res.session), 500); } else setErr(res.err); };
-  const doReg = async () => { setErr(""); if (!u || !p || !name) return setErr("Fill in all fields"); if (p.length < 4) return setErr("Password: min 4 chars"); if (p !== cp) return setErr("Passwords don't match"); setLoading(true); await new Promise(r => setTimeout(r, 500)); const res = Auth.register(u, p, name); setLoading(false); if (res.ok) { setOk("Account created!"); setTimeout(() => { const lr = Auth.login(u, p); if (lr.ok) onLogin?.(lr.session); }, 600); } else setErr(res.err); };
-  const onKey = (e) => { if (e.key === "Enter") mode === "login" ? doLogin() : doReg(); };
-  const iS = (f) => ({ width: "100%", padding: "14px 16px 14px 44px", borderRadius: 12, fontSize: 14, border: `2px solid ${f ? C.accent : C.border}`, background: "#fff", color: C.textDark, outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif", transition: "all 0.2s" });
-
-  const loginInputStyle = (f) => ({ width: "100%", padding: "14px 16px 14px 44px", borderRadius: 12, fontSize: 14, border: `2px solid ${f ? C.accent : "#E8ECF0"}`, background: "#fff", color: C.textDark, outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif", transition: "all 0.2s" });
-
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'DM Sans',sans-serif", background: "#080d18", position: "relative", overflow: "hidden" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
-      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}} @keyframes slideR{from{opacity:0;transform:translateX(-40px)}to{opacity:1;transform:translateX(0)}} @keyframes pulseGlow{0%,100%{opacity:1;transform:translate(-50%,-50%) scale(1)}50%{opacity:0.7;transform:translate(-50%,-50%) scale(1.03)}} @keyframes float{0%,100%{transform:translateY(0);opacity:0.3}50%{transform:translateY(-40px);opacity:0.8}} input::placeholder{color:${C.textLight}}`}</style>
-      {/* Centered massive globe with orange glow */}
-      <div style={{ position: "absolute", left: "45%", top: "50%", transform: "translate(-50%,-50%)", width: 1000, height: 1000, pointerEvents: "none", zIndex: 0 }}>
-        <div style={{ position: "absolute", inset: "20%", borderRadius: "50%", background: "radial-gradient(circle, rgba(232,101,58,0.14) 0%, rgba(245,166,35,0.06) 35%, transparent 65%)", animation: "pulseGlow 6s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <img src="logo_bg.png" alt="" style={{ width: "100%", opacity: 0.05, filter: "brightness(2) grayscale(1)" }} />
-        </div>
-      </div>
-      {/* Floating particle dots */}
-      {[{top:"20%",left:"15%",delay:"0s"},{top:"40%",left:"25%",delay:"1.5s"},{top:"60%",left:"10%",delay:"3s"},{top:"75%",left:"35%",delay:"4.5s"},{top:"30%",left:"50%",delay:"2s"},{top:"80%",left:"55%",delay:"5s"},{top:"15%",left:"60%",delay:"1s"},{top:"50%",left:"5%",delay:"3.5s"}].map((d, i) => (
-        <div key={i} style={{ position: "absolute", width: 2, height: 2, background: "rgba(232,101,58,0.3)", borderRadius: "50%", top: d.top, left: d.left, animation: `float 8s infinite`, animationDelay: d.delay, zIndex: 1 }} />
-      ))}
-      {/* Left content */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 80px", position: "relative", zIndex: 2, animation: ready ? "slideR 0.8s ease" : "none", opacity: ready ? 1 : 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 60 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", boxShadow: `0 8px 32px rgba(232,101,58,0.35)` }}>S</div>
-          <div><div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "'Playfair Display',serif" }}>Service and Operations Dashboard</div><div style={{ fontSize: 12, color: "#ffffff80", letterSpacing: 2, textTransform: "uppercase", fontWeight: 600, marginTop: 2 }}>Performance Analytics</div></div>
-        </div>
-        <h1 style={{ fontSize: 52, fontWeight: 800, color: "#fff", lineHeight: 1.1, margin: "0 0 24px", fontFamily: "'Playfair Display',serif", maxWidth: 520 }}>Real-time SLA<br /><span style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Intelligence</span></h1>
-        <p style={{ fontSize: 17, color: "rgba(255,255,255,0.56)", lineHeight: 1.7, maxWidth: 460, margin: "0 0 48px" }}>Monitor your Service Desk, Programming Team, and Relationship Managers. Powered by Dynamics 365.</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {[["⬥ Dynamics 365", C.d365], ["🔵 Tier 1 Service Desk", null], ["🟠 Tier 2 Programming", null], ["🟣 Tier 3 Rel. Managers", null]].map(([l, c], i) => (
-            <div key={i} style={{ padding: "8px 16px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(232,101,58,0.15)", fontSize: 13, fontWeight: 600, color: c || "rgba(255,255,255,0.8)" }}>{l}</div>
-          ))}
-        </div>
-      </div>
-      {/* Right login card - light with backdrop blur */}
-      <div style={{ width: 480, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 60px", position: "relative", zIndex: 2, animation: ready ? "fadeUp 0.6s ease 0.2s both" : "none" }}>
-        <div style={{ width: "100%", background: "rgba(250,250,248,0.97)", borderRadius: 24, padding: "44px 36px", boxShadow: "0 24px 80px rgba(0,0,0,0.4)", backdropFilter: "blur(20px)" }}>
-          <h2 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display',serif" }}>{mode === "login" ? "Welcome Back" : "Create Account"}</h2>
-          <p style={{ margin: "0 0 28px", fontSize: 14, color: C.textMid }}>{mode === "login" ? "Sign in to your dashboard" : "Set up your SLA Hub access"}</p>
-          <div style={{ display: "flex", gap: 0, marginBottom: 28, background: C.bg, borderRadius: 10, padding: 3 }}>
-            {["login", "register"].map((m) => (<button key={m} onClick={() => { setMode(m); setErr(""); setOk(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: mode === m ? C.card : "transparent", color: mode === m ? C.textDark : C.textLight, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s", fontFamily: "'DM Sans',sans-serif" }}>{m === "login" ? "Sign In" : "Create Account"}</button>))}
-          </div>
-          {mode === "register" && <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>👤</span><input placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>}
-          <div style={{ marginBottom: 16, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>📧</span><input placeholder="Username" value={u} onChange={(e) => setU(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>
-          <div style={{ marginBottom: mode === "register" ? 16 : 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span><input type={showPw ? "text" : "password"} placeholder="Password" value={p} onChange={(e) => setP(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /><span onClick={() => setShowPw(!showPw)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 14, cursor: "pointer", color: C.textLight }}>{showPw ? "🙈" : "👁️"}</span></div>
-          {mode === "register" && <div style={{ marginBottom: 8, position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, color: C.textLight }}>🔒</span><input type="password" placeholder="Confirm Password" value={cp} onChange={(e) => setCp(e.target.value)} onKeyDown={onKey} style={loginInputStyle(false)} /></div>}
-          {err && <div style={{ padding: "10px 14px", borderRadius: 10, background: C.redLight, color: C.red, fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>❌ {err}</div>}
-          {ok && <div style={{ padding: "10px 14px", borderRadius: 10, background: C.greenLight, color: C.green, fontSize: 13, fontWeight: 500, marginTop: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>✅ {ok}</div>}
-          <button onClick={mode === "login" ? doLogin : doReg} disabled={loading} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, color: "#fff", fontSize: 16, fontWeight: 700, cursor: loading ? "wait" : "pointer", marginTop: 20, opacity: loading ? 0.7 : 1, boxShadow: "0 4px 20px rgba(232,101,58,0.35)", fontFamily: "'DM Sans',sans-serif" }}>{loading ? "..." : mode === "login" ? "Sign In →" : "Create Account →"}</button>
         </div>
       </div>
     </div>
@@ -1470,7 +1195,6 @@ function Dashboard({ user, onLogout }) {
   const [liveErrors, setLiveErrors] = useState([]);
   const reportRef = useRef(null);
 
-  // Check for existing MSAL session on mount
   useEffect(() => {
     (async () => {
       try {
@@ -1483,26 +1207,10 @@ function Dashboard({ user, onLogout }) {
     })();
   }, []);
 
-  // Fetch queues from D365 when connected — filter to 3 tiers only
-  // Match logic: find exact queue per tier, with skip rules for duplicates
   const TIER_DEFS = [
-    {
-      tier: 1, label: "Tier 1 — Service Desk",
-      match: (name) => {
-        const n = name.toLowerCase();
-        // Match exactly "<Service Desk>" (with angle brackets)
-        if (n === "<service desk>") return true;
-        return false;
-      },
-    },
-    {
-      tier: 2, label: "Tier 2 — Programming Team",
-      match: (name) => name.toLowerCase().includes("programming team"),
-    },
-    {
-      tier: 3, label: "Tier 3 — Relationship Managers",
-      match: (name) => name.toLowerCase().includes("relationship manager"),
-    },
+    { tier: 1, label: "Tier 1 — Service Desk", match: (name) => { const n = name.toLowerCase(); if (n === "<service desk>") return true; return false; } },
+    { tier: 2, label: "Tier 2 — Programming Team", match: (name) => name.toLowerCase().includes("programming team") },
+    { tier: 3, label: "Tier 3 — Relationship Managers", match: (name) => name.toLowerCase().includes("relationship manager") },
   ];
 
   useEffect(() => {
@@ -1513,46 +1221,25 @@ function Dashboard({ user, onLogout }) {
         for (const tierDef of TIER_DEFS) {
           const cleanQ = q.map(queue => ({ ...queue, cleanName: queue.name.replace(" 🔒", "").trim() }));
           let matches = cleanQ.filter(queue => tierDef.match(queue.cleanName));
-          // If prefer function exists and multiple matches, sort and take first
-          if (matches.length > 1 && tierDef.prefer) {
-            matches.sort(tierDef.prefer);
-          }
-          if (matches.length > 0) {
-            filtered.push({
-              ...matches[0],
-              tierLabel: tierDef.label,
-              tierNum: tierDef.tier,
-            });
-          }
+          if (matches.length > 1 && tierDef.prefer) { matches.sort(tierDef.prefer); }
+          if (matches.length > 0) { filtered.push({ ...matches[0], tierLabel: tierDef.label, tierNum: tierDef.tier }); }
         }
         console.log("Tier queues matched:", filtered.map(f => `${f.tierLabel} → "${f.name}" (${f.id})`));
         setQueues(filtered);
         setLoadingQueues(false);
       }).catch(() => setLoadingQueues(false));
     } else {
-      setQueues([]);
-      setSelectedQueue(null);
-      setTeamMembers(DEMO_TEAM_MEMBERS);
-      setSelectedMembers([]);
+      setQueues([]); setSelectedQueue(null); setTeamMembers(DEMO_TEAM_MEMBERS); setSelectedMembers([]);
     }
   }, [d365Account]);
 
-  // Fetch queue members when a queue is selected
   useEffect(() => {
     if (selectedQueue && selectedQueue !== "all" && d365Account) {
-      setLoadingMembers(true);
-      setSelectedMembers([]);
-      fetchD365QueueMembers(selectedQueue).then(members => {
-        setTeamMembers(members.length > 0 ? members : []);
-        setLoadingMembers(false);
-      }).catch(() => { setTeamMembers([]); setLoadingMembers(false); });
+      setLoadingMembers(true); setSelectedMembers([]);
+      fetchD365QueueMembers(selectedQueue).then(members => { setTeamMembers(members.length > 0 ? members : []); setLoadingMembers(false); }).catch(() => { setTeamMembers([]); setLoadingMembers(false); });
     } else if (selectedQueue === "all" && d365Account) {
-      // For "all tiers", clear member selection — tier report only
-      setSelectedMembers([]);
-      setTeamMembers([]);
-    } else if (!d365Account) {
-      setTeamMembers(DEMO_TEAM_MEMBERS);
-    }
+      setSelectedMembers([]); setTeamMembers([]);
+    } else if (!d365Account) { setTeamMembers(DEMO_TEAM_MEMBERS); }
   }, [selectedQueue, d365Account]);
 
   const canRun = selectedMembers.length > 0 || (d365Account && selectedQueue);
@@ -1565,69 +1252,41 @@ function Dashboard({ user, onLogout }) {
     else if (type === "weekly") { const w = new Date(today); w.setDate(w.getDate() - 7); setStartDate(w.toISOString().split("T")[0]); setEndDate(today.toISOString().split("T")[0]); }
   };
 
-  const handleD365Login = async () => {
-    const result = await msalLogin();
-    if (result?.account) {
-      setD365Account(result.account);
-      return result;
-    }
-    return null;
-  };
-
-  const handleD365Logout = async () => {
-    await msalLogoutD365();
-    setD365Account(null);
-  };
+  const handleD365Login = async () => { const result = await msalLogin(); if (result?.account) { setD365Account(result.account); return result; } return null; };
+  const handleD365Logout = async () => { await msalLogoutD365(); setD365Account(null); };
 
   const [memberData, setMemberData] = useState([]);
 
   const handleRun = async () => {
-    setIsRunning(true);
-    setRunProgress("");
-    setLiveErrors([]);
-    setMemberData([]);
-
+    setIsRunning(true); setRunProgress(""); setLiveErrors([]); setMemberData([]);
     try {
       if (selectedMembers.length > 0) {
-          // Per-member mode — fetch each member's data
-          const results = [];
-          const allErrors = [];
-          for (const memberId of selectedMembers) {
-            const member = teamMembers.find(m => m.id === memberId);
-            if (!member) continue;
-            setRunProgress(`Fetching data for ${member.name}...`);
-            const memberResult = await fetchMemberD365Data(member, startDate, endDate, setRunProgress);
-            results.push(memberResult);
-            allErrors.push(...(memberResult.errors || []));
-          }
-          setMemberData(results);
-          // Also build a combined data object for overall summary
-          const combined = buildCombinedData(results);
-          setData({ ...combined, source: "live" });
-          if (allErrors.length > 0) setLiveErrors(allErrors);
-        } else {
-          // Queue-level mode (no specific members selected) — use global fetch
-          const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress);
-          setData(d);
-          if (d.errors?.length > 0) setLiveErrors(d.errors);
+        const results = []; const allErrors = [];
+        for (const memberId of selectedMembers) {
+          const member = teamMembers.find(m => m.id === memberId);
+          if (!member) continue;
+          setRunProgress(`Fetching data for ${member.name}...`);
+          const memberResult = await fetchMemberD365Data(member, startDate, endDate, setRunProgress);
+          results.push(memberResult); allErrors.push(...(memberResult.errors || []));
         }
-    } catch (err) {
-      setLiveErrors([err.message]);
-    }
-
-    setHasRun(true);
-    setIsRunning(false);
-    setRunProgress("");
+        setMemberData(results);
+        const combined = buildCombinedData(results);
+        setData({ ...combined, source: "live" });
+        if (allErrors.length > 0) setLiveErrors(allErrors);
+      } else {
+        const d = await fetchLiveData(apiConfig, startDate, endDate, setRunProgress);
+        setData(d);
+        if (d.errors?.length > 0) setLiveErrors(d.errors);
+      }
+    } catch (err) { setLiveErrors([err.message]); }
+    setHasRun(true); setIsRunning(false); setRunProgress("");
   };
 
   function buildCombinedData(results) {
     const totals = results.reduce((acc, d) => ({
-      totalCases: acc.totalCases + d.totalCases,
-      resolved: acc.resolved + d.resolvedCases,
-      slaMet: acc.slaMet + d.slaMet,
-      emailCases: acc.emailCases + d.emailCases,
-      emailResolved: acc.emailResolved + d.emailResolved,
-      csatResponses: acc.csatResponses + d.csatResponses,
+      totalCases: acc.totalCases + d.totalCases, resolved: acc.resolved + d.resolvedCases,
+      slaMet: acc.slaMet + d.slaMet, emailCases: acc.emailCases + d.emailCases,
+      emailResolved: acc.emailResolved + d.emailResolved, csatResponses: acc.csatResponses + d.csatResponses,
     }), { totalCases: 0, resolved: 0, slaMet: 0, emailCases: 0, emailResolved: 0, csatResponses: 0 });
     return {
       overall: { created: totals.totalCases, resolved: totals.resolved, csatResponses: totals.csatResponses, answeredCalls: 0, abandonedCalls: 0 },
@@ -1647,17 +1306,11 @@ function Dashboard({ user, onLogout }) {
     <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
       <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } } @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } } @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } } @media print { .no-print { display: none !important; } }`}</style>
-
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
-
-      {/* Header */}
       <div className="no-print" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>S</div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h1>
-            <div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 · Operations</div>
-          </div>
+          <div><h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h1><div style={{ fontSize: 11, color: "#B3D4F7", marginTop: 1, letterSpacing: 0.5 }}>Dynamics 365 · Operations</div></div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, color: "#ffffff80", fontWeight: 500 }}>👤 {user?.name || "User"}</span>
@@ -1667,54 +1320,30 @@ function Dashboard({ user, onLogout }) {
           <button onClick={onLogout} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Logout</button>
         </div>
       </div>
-
       <ConnectionBar d365Connected={!!d365Account} isLive={isLive} onOpenSettings={() => setShowSettings(true)} />
-
       <div style={{ display: "flex", maxWidth: 1500, margin: "0 auto" }}>
-        {/* ═══════ SIDEBAR ═══════ */}
         <div className="no-print" style={{ width: 310, minWidth: 310, background: C.card, borderRight: `1px solid ${C.border}`, padding: "24px 20px", minHeight: "calc(100vh - 110px)", display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>Configure Report</div>
-
-          {/* Tier Selector (when D365 connected) */}
           {d365Account && (
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <span>🏢</span> Tier
-                {loadingQueues && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading...</span>}
-              </div>
-              <select
-                value={selectedQueue || ""}
-                onChange={(e) => setSelectedQueue(e.target.value || null)}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", cursor: "pointer", appearance: "auto" }}
-              >
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>🏢</span> Tier {loadingQueues && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading...</span>}</div>
+              <select value={selectedQueue || ""} onChange={(e) => setSelectedQueue(e.target.value || null)} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", cursor: "pointer", appearance: "auto" }}>
                 <option value="">Select a tier...</option>
                 <option value="all">All Tiers</option>
-                {queues.map(q => (
-                  <option key={q.id} value={q.id}>{q.tierLabel || q.name}</option>
-                ))}
+                {queues.map(q => (<option key={q.id} value={q.id}>{q.tierLabel || q.name}</option>))}
               </select>
-              {selectedQueue && (
-                <div style={{ marginTop: 6, fontSize: 10, color: C.textLight }}>
-                  {queues.find(q => q.id === selectedQueue)?.description || ""}
-                </div>
-              )}
+              {selectedQueue && (<div style={{ marginTop: 6, fontSize: 10, color: C.textLight }}>{queues.find(q => q.id === selectedQueue)?.description || ""}</div>)}
             </div>
           )}
-
-          {/* Team Members */}
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>👥</span> Team Members {loadingMembers && <span style={{ fontSize: 10, color: C.accent, animation: "pulse 1s infinite" }}>Loading from D365...</span>}</div>
             <MultiMemberSelect selected={selectedMembers} onChange={setSelectedMembers} members={teamMembers} />
-            {d365Account && selectedQueue && selectedQueue !== "all" && !loadingMembers && teamMembers.length === 0 && (
-              <div style={{ marginTop: 6, fontSize: 11, color: C.blue, padding: "8px 10px", background: C.blueLight, borderRadius: 8 }}>No individual members found — you can still run the report using the tier's case data.</div>
-            )}
+            {d365Account && selectedQueue && selectedQueue !== "all" && !loadingMembers && teamMembers.length === 0 && (<div style={{ marginTop: 6, fontSize: 11, color: C.blue, padding: "8px 10px", background: C.blueLight, borderRadius: 8 }}>No individual members found — you can still run the report using the tier's case data.</div>)}
             {selectedMembers.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
               {selectedMembers.slice(0, 4).map((id) => { const m = teamMembers.find((t) => t.id === id); const idx = teamMembers.indexOf(m); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: PIE_COLORS[idx % PIE_COLORS.length] + "18", color: PIE_COLORS[idx % PIE_COLORS.length], fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setSelectedMembers(selectedMembers.filter((s) => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
               {selectedMembers.length > 4 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: C.bg, color: C.textLight, fontWeight: 600 }}>+{selectedMembers.length - 4} more</span>}
             </div>}
           </div>
-
-          {/* Report Type */}
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>📊</span> Report Type</div>
             <div style={{ display: "flex", gap: 4 }}>
@@ -1723,8 +1352,6 @@ function Dashboard({ user, onLogout }) {
               ))}
             </div>
           </div>
-
-          {/* Tier Info */}
           <div style={{ marginBottom: 18, background: C.bg, borderRadius: 10, padding: "12px 14px", border: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Queue Tiers</div>
             {Object.values(TIERS).map((t) => (
@@ -1734,8 +1361,6 @@ function Dashboard({ user, onLogout }) {
               </div>
             ))}
           </div>
-
-          {/* Date Range */}
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><span>📅</span> Date Range</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -1746,27 +1371,19 @@ function Dashboard({ user, onLogout }) {
               {[{ l: "7D", s: 7 }, { l: "14D", s: 14 }, { l: "30D", s: 30 }, { l: "90D", s: 90 }, { l: "YTD", s: -1 }].map((q) => <button key={q.l} onClick={() => { const e = new Date(), sD = new Date(); if (q.s === -1) { sD.setMonth(0); sD.setDate(1); } else { sD.setDate(sD.getDate() - q.s); } setStartDate(sD.toISOString().split("T")[0]); setEndDate(e.toISOString().split("T")[0]); setReportType("custom"); }} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 10, fontWeight: 600, color: C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>)}
             </div>
           </div>
-
           <div style={{ flex: 1 }} />
-
-          {/* Run Button */}
           <button onClick={handleRun} disabled={!canRun || isRunning} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: canRun ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, color: canRun ? "#fff" : C.textLight, fontSize: 15, fontWeight: 700, cursor: canRun ? "pointer" : "not-allowed", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: canRun ? "0 4px 20px rgba(232,101,58,0.35)" : "none", opacity: isRunning ? 0.7 : 1 }}>
             {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report (Live)</>}
           </button>
           {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a tier to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
         </div>
-
-        {/* ═══════ MAIN CONTENT ═══════ */}
         <div style={{ flex: 1, padding: "24px 28px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
           {!hasRun ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", textAlign: "center" }}>
               <div style={{ width: 100, height: 100, borderRadius: 24, background: `linear-gradient(135deg, ${C.accent}15, ${C.yellow}15)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>📊</div>
               <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h2>
-              <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>
-                Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>.
-                {<> Live data from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</>}
-              </p>
+              <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>. Live data from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</p>
               <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
                 {[{ icon: "👥", label: `${selectedMembers.length} members`, ok: selectedMembers.length > 0 }, { icon: "📊", label: reportType === "daily" ? "Daily Report" : reportType === "weekly" ? "Weekly Report" : "Custom Range", ok: true }, { icon: "📅", label: `${startDate} → ${endDate}`, ok: startDate && endDate }].map((s, i) => <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: s.ok ? C.greenLight + "22" : C.accentLight + "22", border: `1px solid ${s.ok ? C.greenLight + "44" : C.accentLight + "44"}`, fontSize: 12, fontWeight: 600, color: s.ok ? C.green : C.accent, display: "flex", alignItems: "center", gap: 6 }}><span>{s.icon}</span> {s.label} {s.ok ? "✓" : "✗"}</div>)}
               </div>
@@ -1778,7 +1395,6 @@ function Dashboard({ user, onLogout }) {
             </div>
           ) : data && (
             <div style={{ animation: "slideIn 0.4s ease" }} ref={reportRef}>
-              {/* Report Header */}
               <div style={{ marginBottom: 24, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Operations Report`}</h2>
@@ -1790,8 +1406,6 @@ function Dashboard({ user, onLogout }) {
                   </div>
                 </div>
               </div>
-
-              {/* Errors banner */}
               {liveErrors.length > 0 && (
                 <div style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 10, background: C.orangeLight, border: `1px solid ${C.orange}30` }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: C.orange, marginBottom: 4 }}>⚠️ Some data could not be fetched ({liveErrors.length} issue{liveErrors.length > 1 ? "s" : ""})</div>
@@ -1799,30 +1413,18 @@ function Dashboard({ user, onLogout }) {
                   {liveErrors.length > 5 && <div style={{ fontSize: 10, color: C.textLight }}>...and {liveErrors.length - 5} more</div>}
                 </div>
               )}
-
-              {/* Report Sections */}
               {memberData.length > 0 ? (
                 <>
-                  {/* Per-member report cards */}
-                  {memberData.map((md, i) => (
-                    <MemberSection key={md.member.id} memberData={md} index={i} />
-                  ))}
-                  {/* Team summary */}
+                  {memberData.map((md, i) => (<MemberSection key={md.member.id} memberData={md} index={i} />))}
                   <TeamSummary memberDataList={memberData} />
                   <Definitions />
                 </>
               ) : (
                 <>
-                  {/* Show only the selected tier, or all tiers */}
                   {(() => {
-                    if (selectedQueue === "all") {
-                      return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />);
-                    }
+                    if (selectedQueue === "all") { return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />); }
                     const selectedTierNum = queues.find(q => q.id === selectedQueue)?.tierNum;
-                    if (selectedTierNum) {
-                      return <TierSection tier={selectedTierNum} data={data} members={teamMembers} />;
-                    }
-                    // Fallback: show all tiers
+                    if (selectedTierNum) { return <TierSection tier={selectedTierNum} data={data} members={teamMembers} />; }
                     return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />);
                   })()}
                   <OverallSummary data={data} />
@@ -1842,13 +1444,19 @@ function Dashboard({ user, onLogout }) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   APP ROOT
+   APP ROOT — CHANGED: No more LoginPage, logout reloads to MSAL landing
    ═══════════════════════════════════════════════════════ */
 export default function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   useEffect(() => { const s = Auth.session(); if (s) setUser(s); setChecking(false); }, []);
   if (checking) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.primary, color: "#fff", fontFamily: "'DM Sans',sans-serif" }}><div style={{ textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 16, margin: "0 auto 16px", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff" }}>S</div><div style={{ fontSize: 14, color: "#ffffff60" }}>Loading...</div></div></div>;
-  if (!user) return <LoginPage onLogin={(s) => setUser(s)} />;
-  return <Dashboard user={user} onLogout={() => { Auth.logout(); setUser(null); }} />;
+  if (!user) {
+    // No dashboard session — clear MSAL tokens and reload to show landing page
+    Auth.logout();
+    sessionStorage.clear();
+    window.location.reload();
+    return null;
+  }
+  return <Dashboard user={user} onLogout={() => { Auth.logout(); sessionStorage.clear(); window.location.reload(); }} />;
 }
