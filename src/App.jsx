@@ -358,8 +358,9 @@ function generateDemoData(startDate, endDate, selectedMembers) {
    LIVE DATA FETCHER — D365 OData
    ═══════════════════════════════════════════════════════ */
 
-async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
+async function fetchMemberD365Data(member, startDate, endDate, onProgress, startTime, endTime) {
   const s = startDate, e = endDate;
+  const sT = (startTime || "00:00") + ":00Z", eT = (endTime || "23:59") + ":59Z";
   const oid = member.id;
   const errors = [];
   const progress = (msg) => onProgress?.(`${member.name}: ${msg}`);
@@ -380,31 +381,31 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   }
 
   const totalCases = await safeCount("Total Cases",
-    `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const resolvedCases = await safeFetchCount("Resolved",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const slaMet = resolvedCases;
   const fcrCases = await safeFetchCount("FCR",
-    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const escalatedCases = await safeCount("Escalated",
-    `incidents?$filter=_ownerid_value eq ${oid} and isescalated eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and isescalated eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const activeCases = await safeCount("Active",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 0 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 0 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
 
   const emailCases = await safeCount("Email Cases",
-    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const emailResolved = await safeFetchCount("Email Resolved",
-    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=_ownerid_value eq ${oid} and caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
 
   const casesCreatedBy = await safeCount("Cases Created",
-    `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
 
   const totalPhoneCalls = await safeFetchCount("Total Phone Calls",
-    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes`);
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
   const answeredLive = await safeFetchCount("Answered Calls",
-    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=actualdurationminutes`);
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT} and actualdurationminutes gt 0&$select=actualdurationminutes`);
   const abandonedCalls = await safeFetchCount("Abandoned Calls",
-    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=actualdurationminutes`);
+    `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT} and actualdurationminutes eq 0&$select=actualdurationminutes`);
   const incomingCalls = totalPhoneCalls;
   const outgoingCalls = 0;
   const voicemails = abandonedCalls;
@@ -413,7 +414,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   if (totalPhoneCalls > 0) {
     try {
       const ahtData = await d365Fetch(
-        `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes&$top=5000`
+        `phonecalls?$filter=_ownerid_value eq ${oid} and actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes&$top=5000`
       );
       if (ahtData.value?.length > 0) {
         const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes) || 0).filter(n => !isNaN(n));
@@ -429,7 +430,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   try {
     progress("CSAT");
     const csatData = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=cr7fe_new_csatscore`
+      `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=cr7fe_new_csatscore`
     );
     csatResponses = csatData.value?.length || 0;
     if (csatResponses > 0) {
@@ -442,7 +443,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress) {
   try {
     progress("Resolution time");
     const resolved = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT} and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=50&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
@@ -515,44 +516,44 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   }
 
   const t1Cases = await safeCount("Tier 1 Cases",
-    `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const t1SLAMet = await safeFetchCount("SLA Met Cases",
-    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1FCR = await safeFetchCount("FCR Cases",
-    `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
-    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
 
   const t2Cases = await safeCount("Tier 2 Cases",
-    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
   const t2Resolved = await safeFetchCount("Tier 2 Resolved",
-    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t2SLAMet = t2Resolved;
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
-    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
 
   const t3Cases = await safeCount("Tier 3 Cases",
-    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
   const t3Resolved = await safeFetchCount("Tier 3 Resolved",
-    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t3SLAMet = t3Resolved;
 
   const emailCases = await safeCount("Email Cases",
-    `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const emailResponded = await safeCount("Email Responded",
-    `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=caseorigincode eq 2 and firstresponsesent eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const emailResolved = await safeFetchCount("Email Resolved",
-    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=incidentid&$count=true`);
+    `incidents?$filter=caseorigincode eq 2 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
 
   const csatResponses = await safeCount("CSAT Responses",
-    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$count=true&$top=1`);
+    `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$count=true&$top=1`);
 
   let csatAvg = "N/A";
   if (csatResponses > 0) {
     try {
       progress("Fetching CSAT Scores...");
       const csatData = await d365Fetch(
-        `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=cr7fe_new_csatscore`
+        `incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=cr7fe_new_csatscore`
       );
       if (csatData.value?.length > 0) {
         const scores = csatData.value.map(r => parseFloat(r.cr7fe_new_csatscore)).filter(n => !isNaN(n));
@@ -567,7 +568,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   try {
     progress("Fetching resolution times...");
     const resolved = await d365Fetch(
-      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
+      `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT} and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=incidentid,cr7fe_new_handletime,createdon,modifiedon&$top=5000&$orderby=modifiedon desc`
     );
     if (resolved.value?.length > 0) {
       const handleTimes = resolved.value.map(r => parseFloat(r.cr7fe_new_handletime)).filter(n => !isNaN(n) && n > 0);
@@ -597,18 +598,18 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
   } catch (err) { errors.push(`Resolution time: ${err.message}`); }
 
   const phoneTotal = await safeFetchCount("Phone Total",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes`);
+    `phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes`);
   const phoneAnswered = await safeFetchCount("Phone Answered",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes gt 0&$select=actualdurationminutes`);
+    `phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT} and actualdurationminutes gt 0&$select=actualdurationminutes`);
   const phoneAbandoned = await safeFetchCount("Phone Abandoned",
-    `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z and actualdurationminutes eq 0&$select=actualdurationminutes`);
+    `phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT} and actualdurationminutes eq 0&$select=actualdurationminutes`);
   const phoneAnswerRate = phoneTotal > 0 ? Math.round(phoneAnswered / phoneTotal * 100) : 0;
 
   let phoneAHT = "N/A";
   try {
     progress("Fetching Phone AHT...");
     const ahtData = await d365Fetch(
-      `phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualdurationminutes&$top=5000`
+      `phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualdurationminutes&$top=5000`
     );
     if (ahtData.value?.length > 0) {
       const durations = ahtData.value.map(r => parseFloat(r.actualdurationminutes) || 0).filter(n => !isNaN(n));
@@ -626,12 +627,12 @@ async function fetchLiveD365Data(startDate, endDate, onProgress) {
     if (dayCount >= 2 && dayCount <= 90) {
       progress("Building timeline...");
       const [t1Raw, t2Raw, t3Raw, phoneRaw, csatRaw, slaRaw] = await Promise.all([
-        d365Fetch(`incidents?$filter=casetypecode eq 1 and createdon ge ${s}T00:00:00Z and createdon le ${e}T23:59:59Z&$select=createdon&$top=5000`),
-        d365Fetch(`incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=escalatedon&$top=5000`),
-        d365Fetch(`incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T00:00:00Z and escalatedon le ${e}T23:59:59Z&$select=escalatedon&$top=5000`),
-        d365Fetch(`phonecalls?$filter=actualstart ge ${s}T00:00:00Z and actualstart le ${e}T23:59:59Z&$select=actualstart&$top=5000`),
-        d365Fetch(`incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=modifiedon,cr7fe_new_csatscore&$top=5000`),
-        d365Fetch(`incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T00:00:00Z and modifiedon le ${e}T23:59:59Z&$select=modifiedon&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=createdon&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=escalatedon&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=escalatedon&$top=5000`),
+        d365Fetch(`phonecalls?$filter=actualstart ge ${s}T${sT} and actualstart le ${e}T${eT}&$select=actualstart&$top=5000`),
+        d365Fetch(`incidents?$filter=cr7fe_new_csatresponsereceived eq true and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=modifiedon,cr7fe_new_csatscore&$top=5000`),
+        d365Fetch(`incidents?$filter=casetypecode eq 1 and statecode eq 1 and modifiedon ge ${s}T${sT} and modifiedon le ${e}T${eT}&$select=modifiedon&$top=5000`),
       ]);
       const bucket = (records, dateField) => {
         const map = {};
@@ -1185,6 +1186,8 @@ function Dashboard({ user, onLogout }) {
   const [reportType, setReportType] = useState("daily");
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [startTime, setStartTime] = useState("00:00");
+  const [endTime, setEndTime] = useState("23:59");
   const [data, setData] = useState(null);
   const [hasRun, setHasRun] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -1266,7 +1269,7 @@ function Dashboard({ user, onLogout }) {
           const member = teamMembers.find(m => m.id === memberId);
           if (!member) continue;
           setRunProgress(`Fetching data for ${member.name}...`);
-          const memberResult = await fetchMemberD365Data(member, startDate, endDate, setRunProgress);
+          const memberResult = await fetchMemberD365Data(member, startDate, endDate, setRunProgress, startTime, endTime);
           results.push(memberResult); allErrors.push(...(memberResult.errors || []));
         }
         setMemberData(results);
@@ -1370,8 +1373,12 @@ function Dashboard({ user, onLogout }) {
               <label><div style={{ fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 }}>From</div><input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReportType("custom"); }} style={{ width: "100%", padding: "8px 8px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 11, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} /></label>
               <label><div style={{ fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 }}>To</div><input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReportType("custom"); }} style={{ width: "100%", padding: "8px 8px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 11, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} /></label>
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+              <label><div style={{ fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 }}>From Time</div><input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ width: "100%", padding: "8px 8px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 11, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} /></label>
+              <label><div style={{ fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 }}>To Time</div><input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ width: "100%", padding: "8px 8px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 11, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} /></label>
+            </div>
             <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-              {[{ l: "7D", s: 7 }, { l: "14D", s: 14 }, { l: "30D", s: 30 }, { l: "90D", s: 90 }, { l: "YTD", s: -1 }].map((q) => <button key={q.l} onClick={() => { const e = new Date(), sD = new Date(); if (q.s === -1) { sD.setMonth(0); sD.setDate(1); } else { sD.setDate(sD.getDate() - q.s); } setStartDate(sD.toISOString().split("T")[0]); setEndDate(e.toISOString().split("T")[0]); setReportType("custom"); }} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 10, fontWeight: 600, color: C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>)}
+              {[{ l: "7D", s: 7 }, { l: "14D", s: 14 }, { l: "30D", s: 30 }, { l: "90D", s: 90 }, { l: "YTD", s: -1 }].map((q) => <button key={q.l} onClick={() => { const e = new Date(), sD = new Date(); if (q.s === -1) { sD.setMonth(0); sD.setDate(1); } else { sD.setDate(sD.getDate() - q.s); } setStartDate(sD.toISOString().split("T")[0]); setEndDate(e.toISOString().split("T")[0]); setStartTime("00:00"); setEndTime("23:59"); setReportType("custom"); }} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 10, fontWeight: 600, color: C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>)}
             </div>
           </div>
           <div style={{ flex: 1 }} />
@@ -1388,7 +1395,7 @@ function Dashboard({ user, onLogout }) {
               <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h2>
               <p style={{ margin: 0, fontSize: 14, color: C.textMid, maxWidth: 440, lineHeight: 1.6 }}>Select your team members, choose a report type, set your date range, and hit <strong style={{ color: C.accent }}>Run Report</strong>. Live data from <strong style={{ color: C.d365 }}>Dynamics 365</strong>.</p>
               <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
-                {[{ icon: "👥", label: `${selectedMembers.length} members`, ok: selectedMembers.length > 0 }, { icon: "📊", label: reportType === "daily" ? "Daily Report" : reportType === "weekly" ? "Weekly Report" : "Custom Range", ok: true }, { icon: "📅", label: `${startDate} → ${endDate}`, ok: startDate && endDate }].map((s, i) => <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: s.ok ? C.greenLight + "22" : C.accentLight + "22", border: `1px solid ${s.ok ? C.greenLight + "44" : C.accentLight + "44"}`, fontSize: 12, fontWeight: 600, color: s.ok ? C.green : C.accent, display: "flex", alignItems: "center", gap: 6 }}><span>{s.icon}</span> {s.label} {s.ok ? "✓" : "✗"}</div>)}
+                {[{ icon: "👥", label: `${selectedMembers.length} members`, ok: selectedMembers.length > 0 }, { icon: "📊", label: reportType === "daily" ? "Daily Report" : reportType === "weekly" ? "Weekly Report" : "Custom Range", ok: true }, { icon: "📅", label: `${startDate} ${startTime} → ${endDate} ${endTime}`, ok: startDate && endDate }].map((s, i) => <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: s.ok ? C.greenLight + "22" : C.accentLight + "22", border: `1px solid ${s.ok ? C.greenLight + "44" : C.accentLight + "44"}`, fontSize: 12, fontWeight: 600, color: s.ok ? C.green : C.accent, display: "flex", alignItems: "center", gap: 6 }}><span>{s.icon}</span> {s.label} {s.ok ? "✓" : "✗"}</div>)}
               </div>
               {!d365Account && (
                 <div style={{ marginTop: 24, padding: "14px 20px", borderRadius: 12, background: `${C.d365}08`, border: `1px solid ${C.d365}20`, maxWidth: 440 }}>
