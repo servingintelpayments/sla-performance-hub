@@ -1440,352 +1440,234 @@ function SendReportModal({ show, onClose, onSend, dateLabel }) {
   );
 }
 
-function AutoReportModal({ show, onClose }) {
+
+const AUTOREPORT_PY_CONTENT = "\"\"\"Auto KPI Report - Queries D365 + Sends styled email via Graph API\"\"\"\nimport os, sys, json\nfrom datetime import datetime, timedelta, timezone\nfrom zoneinfo import ZoneInfo\nimport requests\nfrom msal import ConfidentialClientApplication\n\nD365_TENANT = os.environ[\"D365_TENANT_ID\"]\nD365_CLIENT = os.environ[\"D365_CLIENT_ID\"]\nD365_SECRET = os.environ[\"D365_CLIENT_SECRET\"]\nORG_URL = os.environ[\"D365_ORG_URL\"].rstrip(\"/\")\nGRAPH_TENANT = os.environ.get(\"GRAPH_TENANT_ID\", D365_TENANT)\nGRAPH_CLIENT = os.environ.get(\"GRAPH_CLIENT_ID\", D365_CLIENT)\nGRAPH_SECRET = os.environ.get(\"GRAPH_CLIENT_SECRET\", D365_SECRET)\nSEND_FROM = os.environ[\"SEND_FROM\"]\nSEND_TO = os.environ[\"SEND_TO\"]\nLOOKBACK = int(os.environ.get(\"LOOKBACK_HOURS\", \"24\"))\nTIERS = os.environ.get(\"REPORT_TIERS\", \"ALL\")\nMEMBERS = [m.strip() for m in os.environ.get(\"REPORT_MEMBERS\", \"\").split(\",\") if m.strip()]\nTIME_FROM = os.environ.get(\"TIME_FROM\", \"00:00\")\nTIME_TO = os.environ.get(\"TIME_TO\", \"23:59\")\nAPI_BASE = f\"{ORG_URL}/api/data/v9.2\"\nCT = ZoneInfo(\"America/Chicago\")\n\ndef get_d365_token():\n    app = ConfidentialClientApplication(D365_CLIENT, authority=f\"https://login.microsoftonline.com/{D365_TENANT}\", client_credential=D365_SECRET)\n    r = app.acquire_token_for_client(scopes=[f\"{ORG_URL}/.default\"])\n    if \"access_token\" not in r: print(f\"D365 auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\ndef get_graph_token():\n    app = ConfidentialClientApplication(GRAPH_CLIENT, authority=f\"https://login.microsoftonline.com/{GRAPH_TENANT}\", client_credential=GRAPH_SECRET)\n    r = app.acquire_token_for_client(scopes=[\"https://graph.microsoft.com/.default\"])\n    if \"access_token\" not in r: print(f\"Graph auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\nS = requests.Session()\n\ndef init_d365(token):\n    S.headers.update({\"Authorization\": f\"Bearer {token}\", \"OData-MaxVersion\": \"4.0\", \"OData-Version\": \"4.0\", \"Accept\": \"application/json\", \"Prefer\": \"odata.include-annotations=*,odata.maxpagesize=5000\"})\n\ndef d365_get(q):\n    url = f\"{API_BASE}/{q}\"\n    rows = []\n    while url:\n        r = S.get(url); r.raise_for_status(); d = r.json()\n        rows.extend(d.get(\"value\", [])); url = d.get(\"@odata.nextLink\")\n    return rows\n\ndef d365_count(q):\n    r = S.get(f\"{API_BASE}/{q}\"); r.raise_for_status(); d = r.json()\n    return d.get(\"@odata.count\", len(d.get(\"value\", [])))\n\ndef get_range():\n    now = datetime.now(CT)\n    start = now - timedelta(hours=LOOKBACK)\n    fh, fm2 = map(int, TIME_FROM.split(\":\"))\n    th, tm2 = map(int, TIME_TO.split(\":\"))\n    start = start.replace(hour=fh, minute=fm2, second=0, microsecond=0)\n    end = now.replace(hour=th, minute=tm2, second=59, microsecond=0)\n    s = start.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    e = end.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    label = f\"{start.strftime('%b %d, %I:%M %p')} - {end.strftime('%b %d, %I:%M %p %Z')}\"\n    return s, e, label\n\ndef count_kpi(rows, field):\n    met = missed = 0\n    for r in rows:\n        st = (r.get(field) or {}).get(\"status\")\n        if st == 4: met += 1\n        elif st == 1: missed += 1\n    return met, missed\n\ndef pct(n, d): return round(n/d*100) if d > 0 else \"N/A\"\ndef sla_pct(m, x): t = m+x; return round(m/t*100) if t > 0 else \"N/A\"\ndef ic(v, tgt, inv=False):\n    if v == \"N/A\": return \"\u2796\"\n    return \"\u2705\" if (inv and v < tgt) or (not inv and v >= tgt) else \"\ud83d\udd34\"\ndef fm(v): return f\"{v}%\" if v != \"N/A\" else \"N/A\"\n\ndef fetch_tier(code, df, s, e):\n    base = f\"casetypecode eq {code} and {df} ge {s} and {df} le {e}\"\n    total = d365_count(f\"incidents?$filter={base}&$count=true&$top=1\")\n    resolved = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    resp = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=firstresponsebykpiid($select=status)\")\n    active = d365_get(f\"incidents?$filter={base} and statecode eq 0&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    sm, sx = count_kpi(resolved, \"resolvebykpiid\")\n    rm, rx = count_kpi(resp, \"firstresponsebykpiid\")\n    breached = sum(1 for r in active if (r.get(\"resolvebykpiid\") or {}).get(\"status\") == 1)\n    return {\"total\": total, \"resolved\": len(resolved), \"sla_met\": sm, \"sla_missed\": sx, \"sla\": sla_pct(sm, sx),\n            \"resp_met\": rm, \"resp_missed\": rx, \"resp_sla\": sla_pct(rm, rx),\n            \"breach\": breached, \"breach_total\": len(active), \"breach_rate\": pct(breached, len(active)) if len(active) > 0 else 0}\n\ndef row(label, val, indent=False):\n    pad = \"padding-left:14px;font-size:12px;\" if indent else \"\"\n    return f'<tr><td style=\"padding:6px 0;color:#555;{pad}\">{label}</td><td style=\"padding:6px 0;text-align:right;font-weight:700;\">{val}</td></tr>'\n\ndef build_html(tiers_data, ph, em, cs, label, config_label):\n    colors = {1: (\"#1565c0\",\"#2196F3\"), 2: (\"#e65100\",\"#FF9800\"), 3: (\"#7b1fa2\",\"#9C27B0\")}\n    tier_html = \"\"\n    for td in tiers_data:\n        c1, c2 = colors.get(td[\"code\"], (\"#333\",\"#666\"))\n        t = td[\"data\"]\n        tier_html += f'''<div style=\"background:linear-gradient(135deg,{c1},{c2});color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;\"><strong>{td[\"name\"]}</strong></div>\n<div style=\"background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;\"><table style=\"width:100%;border-collapse:collapse;font-size:13px;\">\n{row(\"SLA Compliance\", f\"{fm(t['sla'])} {ic(t['sla'],90)}\")}\n{row(f\"  {t['sla_met']} met / {t['sla_missed']} missed\", \"\", True)}\n{row(\"Response SLA\", f\"{fm(t['resp_sla'])} {ic(t['resp_sla'],90)}\")}\n{row(\"Open Breach\", f\"{t['breach_rate']}% {ic(t['breach_rate'],5,True)} ({t['breach']}/{t['breach_total']})\")}\n{row(\"FCR\", f\"{fm(t.get('fcr_rate','N/A'))} {ic(t.get('fcr_rate','N/A'),90)}\")}\n{row(\"Escalation\", f\"{fm(t.get('esc_rate','N/A'))} {ic(t.get('esc_rate','N/A'),10,True)}\")}\n{row(\"Total\", t[\"total\"])}{row(\"Resolved\", t[\"resolved\"])}\n</table></div>'''\n    tc = sum(t[\"data\"][\"total\"] for t in tiers_data)\n    tr = sum(t[\"data\"][\"resolved\"] for t in tiers_data)\n    return f'''<div style=\"font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;\">\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;\">\n<h1 style=\"margin:0;font-size:20px;\">Auto Report</h1>\n<p style=\"margin:4px 0 0;font-size:13px;opacity:0.85;\">{label}</p>\n<p style=\"margin:2px 0 0;font-size:10px;opacity:0.6;\">{config_label}</p></div>\n{tier_html}\n<table style=\"width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;\"><tr>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2D9D78;\">Phone</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",ph[\"total\"])}{row(\"Answered\",ph[\"answered\"])}{row(\"Abandoned\",ph[\"abandoned\"])}{row(\"Rate\",f\"{fm(ph['rate'])} {ic(ph['rate'],95)}\")}</table></td>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2196F3;\">Email</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",em[\"total\"])}{row(\"Responded\",em[\"responded\"])}{row(\"Resolved\",em[\"resolved\"])}</table></td>\n</tr></table>\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;\">\n<strong>OVERALL</strong><table style=\"width:100%;margin-top:12px;\"><tr>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#4FC3F7;\">{tc}</div><div style=\"font-size:10px;color:#a8c6df;\">Created</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{tr}</div><div style=\"font-size:10px;color:#a8c6df;\">Resolved</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{ph[\"answered\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Answered</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#f44336;\">{ph[\"abandoned\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Abandoned</div></td>\n</tr></table></div>\n<p style=\"text-align:center;font-size:10px;color:#999;margin-top:16px;\">Auto-generated from Dynamics 365</p></div>'''\n\ndef send_email(html, label):\n    token = get_graph_token()\n    recipients = [{\"emailAddress\": {\"address\": e.strip()}} for e in SEND_TO.split(\",\") if e.strip()]\n    payload = {\"message\": {\"subject\": f\"Auto Report - {label}\", \"body\": {\"contentType\": \"HTML\", \"content\": html}, \"toRecipients\": recipients, \"from\": {\"emailAddress\": {\"address\": SEND_FROM}}}}\n    r = requests.post(f\"https://graph.microsoft.com/v1.0/users/{SEND_FROM}/sendMail\", headers={\"Authorization\": f\"Bearer {token}\", \"Content-Type\": \"application/json\"}, json=payload)\n    if r.status_code not in (200, 202): print(f\"Email failed ({r.status_code}): {r.text[:300]}\"); sys.exit(1)\n    print(f\"Email sent to {SEND_TO}\")\n\ndef main():\n    print(\"Authenticating D365...\")\n    init_d365(get_d365_token())\n    s, e, label = get_range()\n    print(f\"Report: {label}\")\n    tier_configs = [\n        {\"code\": 1, \"df\": \"createdon\", \"name\": \"Tier 1 - Service Desk\"},\n        {\"code\": 2, \"df\": \"escalatedon\", \"name\": \"Tier 2 - Programming\"},\n        {\"code\": 3, \"df\": \"escalatedon\", \"name\": \"Tier 3 - Relationship Mgrs\"},\n    ]\n    if TIERS != \"ALL\":\n        tier_codes = [int(t.strip()) for t in TIERS.split(\",\")]\n        tier_configs = [tc for tc in tier_configs if tc[\"code\"] in tier_codes]\n    tiers_data = []\n    for tc in tier_configs:\n        print(f\"Querying {tc['name']}...\")\n        t = fetch_tier(tc[\"code\"], tc[\"df\"], s, e)\n        if tc[\"code\"] == 1:\n            fcr = d365_count(f\"incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge {s} and createdon le {e}&$count=true&$top=1\")\n            esc = d365_count(f\"incidents?$filter=casetypecode eq 2 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"fcr_rate\"] = pct(fcr, t[\"total\"]); t[\"esc_rate\"] = pct(esc, t[\"total\"])\n        elif tc[\"code\"] == 2:\n            t2e = d365_count(f\"incidents?$filter=casetypecode eq 3 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"esc_rate\"] = pct(t2e, t[\"total\"])\n        tiers_data.append({**tc, \"data\": t})\n    print(\"Phone...\")\n    try:\n        pb = f\"createdon ge {s} and createdon le {e} and directioncode eq true\"\n        pt = d365_count(f\"phonecalls?$filter={pb}&$count=true&$top=1\")\n        pa = d365_count(f\"phonecalls?$filter={pb} and statecode eq 1&$count=true&$top=1\")\n        ph = {\"total\": pt, \"answered\": pa, \"abandoned\": pt-pa, \"rate\": pct(pa, pt)}\n    except: ph = {\"total\":0,\"answered\":0,\"abandoned\":0,\"rate\":\"N/A\"}\n    print(\"Email...\")\n    eb = f\"caseorigincode eq 2 and createdon ge {s} and createdon le {e}\"\n    em = {\"total\": d365_count(f\"incidents?$filter={eb}&$count=true&$top=1\"),\n          \"responded\": d365_count(f\"incidents?$filter={eb} and firstresponsesent eq true&$count=true&$top=1\"),\n          \"resolved\": d365_count(f\"incidents?$filter={eb} and statecode eq 1&$count=true&$top=1\")}\n    print(\"CSAT...\")\n    try:\n        cr = d365_get(f\"cr7fe_new_csats?$filter=createdon ge {s} and createdon le {e}&$select=cr7fe_new_rating\")\n        sc = [r[\"cr7fe_new_rating\"] for r in cr if r.get(\"cr7fe_new_rating\") is not None]\n        cs = {\"count\": len(sc), \"avg\": round(sum(sc)/len(sc),1) if sc else \"N/A\"}\n    except: cs = {\"count\":0,\"avg\":\"N/A\"}\n    tier_label = \"All Tiers\" if TIERS == \"ALL\" else \", \".join(tc[\"name\"] for tc in tiers_data)\n    member_label = f\"{len(MEMBERS)} members\" if MEMBERS else \"\"\n    config_label = tier_label + (\" | \" + member_label if member_label else \"\")\n    html = build_html(tiers_data, ph, em, cs, label, config_label)\n    print(\"Sending email...\"); send_email(html, label)\n    print(\"Done!\")\n\nif __name__ == \"__main__\": main()\n";
+
+function AutoReportModal({ show, onClose, queues, d365Account }) {
   const [emails, setEmails] = useState("");
   const [intervalHours, setIntervalHours] = useState(24);
-  const [lookbackHours, setLookbackHours] = useState(24);
+  const [selectedTier, setSelectedTier] = useState("");
+  const [autoMembers, setAutoMembers] = useState([]);
+  const [autoMembersList, setAutoMembersList] = useState([]);
+  const [loadingAutoMembers, setLoadingAutoMembers] = useState(false);
+  const [startDate, setStartDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [fromTime, setFromTime] = useState("00:00");
+  const [toTime, setToTime] = useState("23:59");
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
+
+  useEffect(() => {
+    if (selectedTier && selectedTier !== "all" && d365Account) {
+      setLoadingAutoMembers(true); setAutoMembers([]);
+      fetchD365QueueMembers(selectedTier).then(m => { setAutoMembersList(m); setLoadingAutoMembers(false); }).catch(() => { setAutoMembersList([]); setLoadingAutoMembers(false); });
+    } else { setAutoMembersList([]); setAutoMembers([]); }
+  }, [selectedTier, d365Account]);
 
   if (!show) return null;
 
   const cronExpr = intervalHours <= 1 ? "0 * * * *"
-    : intervalHours <= 6 ? `0 */${intervalHours} * * *`
     : intervalHours <= 12 ? `0 */${intervalHours} * * *`
     : intervalHours === 24 ? "1 6 * * *"
     : intervalHours === 168 ? "1 6 * * 1"
     : `0 */${intervalHours} * * *`;
 
-  const cronLabel = intervalHours === 1 ? "Every hour" 
-    : intervalHours === 24 ? "Daily at 12:01 AM CT" 
+  const cronLabel = intervalHours === 1 ? "Every hour"
+    : intervalHours === 24 ? "Daily at 12:01 AM CT"
     : intervalHours === 168 ? "Weekly (Monday 12:01 AM CT)"
     : `Every ${intervalHours} hours`;
 
+  const tierObj = queues.find(q => q.id === selectedTier);
+  const tierLabel = selectedTier === "all" ? "All Tiers" : (tierObj?.tierLabel || "Not selected");
+  const tierNum = tierObj?.tierNum || null;
+  const memberNames = autoMembers.map(id => autoMembersList.find(m => m.id === id)?.name || id);
+
+  const setQuickRange = (days) => {
+    const end = new Date();
+    const start = new Date(); start.setDate(start.getDate() - days);
+    setStartDate(start.toISOString().split("T")[0]);
+    setEndDate(end.toISOString().split("T")[0]);
+  };
+
+  const daysDiff = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000));
+
   const handleGenerate = () => {
-    if (!emails.trim()) return;
+    if (!emails.trim() || !selectedTier) return;
     setGenerating(true);
+    const tierConfig = selectedTier === "all" ? "ALL" : String(tierNum || 1);
+    const memberIds = autoMembers.length > 0 ? autoMembers.join(",") : "";
+    const lookbackHours = daysDiff * 24;
 
-    const workflowYaml = `name: Auto KPI Report
-on:
-  schedule:
-    - cron: '${cronExpr}'
-  workflow_dispatch:
+    const yamlLines = [
+      "name: Auto KPI Report",
+      "on:",
+      "  schedule:",
+      "    - cron: '" + cronExpr + "'",
+      "  workflow_dispatch:",
+      "",
+      "jobs:",
+      "  send-report:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "      - uses: actions/setup-python@v5",
+      "        with:",
+      "          python-version: '3.11'",
+      "      - run: pip install requests msal",
+      "      - name: Generate and send report",
+      "        env:",
+      "          D365_TENANT_ID: ${{secrets.D365_TENANT_ID}}",
+      "          D365_CLIENT_ID: ${{secrets.D365_CLIENT_ID}}",
+      "          D365_CLIENT_SECRET: ${{secrets.D365_CLIENT_SECRET}}",
+      "          D365_ORG_URL: ${{secrets.D365_ORG_URL}}",
+      "          GRAPH_TENANT_ID: ${{secrets.GRAPH_TENANT_ID}}",
+      "          GRAPH_CLIENT_ID: ${{secrets.GRAPH_CLIENT_ID}}",
+      "          GRAPH_CLIENT_SECRET: ${{secrets.GRAPH_CLIENT_SECRET}}",
+      "          SEND_FROM: ${{secrets.SEND_FROM}}",
+      '          SEND_TO: "' + emails.trim() + '"',
+      '          LOOKBACK_HOURS: "' + lookbackHours + '"',
+      '          REPORT_TIERS: "' + tierConfig + '"',
+      '          REPORT_MEMBERS: "' + memberIds + '"',
+      '          TIME_FROM: "' + fromTime + '"',
+      '          TIME_TO: "' + toTime + '"',
+      "        run: python auto_report.py",
+    ];
+    const workflowYaml = yamlLines.join("\n");
 
-jobs:
-  send-report:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests msal
-      - name: Generate and send report
-        env:
-          D365_TENANT_ID: \${{ secrets.D365_TENANT_ID }}
-          D365_CLIENT_ID: \${{ secrets.D365_CLIENT_ID }}
-          D365_CLIENT_SECRET: \${{ secrets.D365_CLIENT_SECRET }}
-          D365_ORG_URL: \${{ secrets.D365_ORG_URL }}
-          GRAPH_TENANT_ID: \${{ secrets.GRAPH_TENANT_ID }}
-          GRAPH_CLIENT_ID: \${{ secrets.GRAPH_CLIENT_ID }}
-          GRAPH_CLIENT_SECRET: \${{ secrets.GRAPH_CLIENT_SECRET }}
-          SEND_FROM: \${{ secrets.SEND_FROM }}
-          SEND_TO: "${emails.trim()}"
-          LOOKBACK_HOURS: "${lookbackHours}"
-        run: python auto_report.py
-`;
+    const pythonScript = AUTOREPORT_PY_CONTENT;
 
-    const pythonScript = `"""Auto KPI Report — Queries D365 + Sends styled email via Graph API"""
-import os, sys, json
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-import requests
-from msal import ConfidentialClientApplication
+    const readmeLines = [
+      "# Auto KPI Report", "",
+      "Automated service desk report via GitHub Actions.", "",
+      "## Configuration",
+      "- Tier: " + tierLabel,
+      "- Members: " + (memberNames.length > 0 ? memberNames.join(", ") : "All"),
+      "- Schedule: " + cronLabel,
+      "- Lookback: " + daysDiff + " day(s)",
+      "- Time window: " + fromTime + " - " + toTime,
+      "- Recipients: " + emails.trim(), "",
+      "## Setup", "",
+      "### 1. Azure App Registration",
+      "Add **Microsoft Graph > Application > Mail.Send** + Grant admin consent", "",
+      "### 2. GitHub Secrets",
+      "| Secret | Value |",
+      "|--------|-------|",
+      "| D365_TENANT_ID | 1b0086bd-aeda-4c74-a15a-23adfe4d0693 |",
+      "| D365_CLIENT_ID | 0918449d-b73e-428a-8238-61723f2a2e7d |",
+      "| D365_CLIENT_SECRET | Your app client secret |",
+      "| D365_ORG_URL | https://servingintel.crm.dynamics.com |",
+      "| GRAPH_TENANT_ID | (same as D365_TENANT_ID) |",
+      "| GRAPH_CLIENT_ID | (same as D365_CLIENT_ID) |",
+      "| GRAPH_CLIENT_SECRET | (same as D365_CLIENT_SECRET) |",
+      "| SEND_FROM | your-email@servingintel.com |", "",
+      "### 3. Push and Run",
+      'git add . && git commit -m "auto report" && git push',
+      "Go to Actions > Run workflow to test",
+    ];
+    const readmeText = readmeLines.join("\n");
 
-# ─── CONFIG ──────────────────────────────────────────
-D365_TENANT   = os.environ["D365_TENANT_ID"]
-D365_CLIENT   = os.environ["D365_CLIENT_ID"]
-D365_SECRET   = os.environ["D365_CLIENT_SECRET"]
-ORG_URL       = os.environ["D365_ORG_URL"].rstrip("/")
-GRAPH_TENANT  = os.environ.get("GRAPH_TENANT_ID", D365_TENANT)
-GRAPH_CLIENT  = os.environ.get("GRAPH_CLIENT_ID", D365_CLIENT)
-GRAPH_SECRET  = os.environ.get("GRAPH_CLIENT_SECRET", D365_SECRET)
-SEND_FROM     = os.environ["SEND_FROM"]
-SEND_TO       = os.environ["SEND_TO"]
-LOOKBACK      = int(os.environ.get("LOOKBACK_HOURS", "24"))
-API_BASE      = f"{ORG_URL}/api/data/v9.2"
-CT            = ZoneInfo("America/Chicago")
-
-# ─── AUTH ────────────────────────────────────────────
-def get_d365_token():
-    app = ConfidentialClientApplication(D365_CLIENT, authority=f"https://login.microsoftonline.com/{D365_TENANT}", client_credential=D365_SECRET)
-    r = app.acquire_token_for_client(scopes=[f"{ORG_URL}/.default"])
-    if "access_token" not in r: print(f"D365 auth failed: {r}"); sys.exit(1)
-    return r["access_token"]
-
-def get_graph_token():
-    app = ConfidentialClientApplication(GRAPH_CLIENT, authority=f"https://login.microsoftonline.com/{GRAPH_TENANT}", client_credential=GRAPH_SECRET)
-    r = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
-    if "access_token" not in r: print(f"Graph auth failed: {r}"); sys.exit(1)
-    return r["access_token"]
-
-# ─── D365 HELPERS ────────────────────────────────────
-S = requests.Session()
-
-def init_d365(token):
-    S.headers.update({"Authorization": f"Bearer {token}", "OData-MaxVersion": "4.0", "OData-Version": "4.0", "Accept": "application/json", "Prefer": "odata.include-annotations=*,odata.maxpagesize=5000"})
-
-def d365_get(q):
-    url = f"{API_BASE}/{q}"
-    rows = []
-    while url:
-        r = S.get(url); r.raise_for_status(); d = r.json()
-        rows.extend(d.get("value", [])); url = d.get("@odata.nextLink")
-    return rows
-
-def d365_count(q):
-    r = S.get(f"{API_BASE}/{q}"); r.raise_for_status(); d = r.json()
-    return d.get("@odata.count", len(d.get("value", [])))
-
-# ─── DATE RANGE ──────────────────────────────────────
-def get_range():
-    now = datetime.now(CT)
-    start = now - timedelta(hours=LOOKBACK)
-    s = start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    e = now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    label = f"{start.strftime('%b %d, %I:%M %p')} — {now.strftime('%b %d, %I:%M %p %Z')}"
-    return s, e, label
-
-# ─── SLA HELPERS ─────────────────────────────────────
-def count_kpi(rows, field):
-    met = missed = 0
-    for r in rows:
-        st = (r.get(field) or {}).get("status")
-        if st == 4: met += 1
-        elif st == 1: missed += 1
-    return met, missed
-
-def pct(n, d): return round(n/d*100) if d > 0 else "N/A"
-def sla_pct(m, x): t = m+x; return round(m/t*100) if t > 0 else "N/A"
-def ic(v, tgt, inv=False):
-    if v == "N/A": return "\\u27A1\\uFE0F"
-    return "\\u2705" if (inv and v < tgt) or (not inv and v >= tgt) else "\\U0001F534"
-def fm(v): return f"{v}%" if v != "N/A" else "N/A"
-
-# ─── TIER QUERY ──────────────────────────────────────
-def fetch_tier(code, df, s, e):
-    base = f"casetypecode eq {code} and {df} ge {s} and {df} le {e}"
-    total = d365_count(f"incidents?$filter={base}&$count=true&$top=1")
-    resolved = d365_get(f"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=resolvebykpiid($select=status)")
-    resp = d365_get(f"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=firstresponsebykpiid($select=status)")
-    active = d365_get(f"incidents?$filter={base} and statecode eq 0&$select=incidentid&$expand=resolvebykpiid($select=status)")
-    sm, sx = count_kpi(resolved, "resolvebykpiid")
-    rm, rx = count_kpi(resp, "firstresponsebykpiid")
-    breached = sum(1 for r in active if (r.get("resolvebykpiid") or {}).get("status") == 1)
-    return {"total": total, "resolved": len(resolved), "sla_met": sm, "sla_missed": sx, "sla": sla_pct(sm, sx),
-            "resp_met": rm, "resp_missed": rx, "resp_sla": sla_pct(rm, rx),
-            "breach": breached, "breach_total": len(active), "breach_rate": pct(breached, len(active)) if len(active) > 0 else 0}
-
-# ─── HTML EMAIL ──────────────────────────────────────
-def row(label, val, indent=False):
-    pad = "padding-left:14px;font-size:12px;" if indent else ""
-    return f'<tr><td style="padding:6px 0;color:#555;{pad}">{label}</td><td style="padding:6px 0;text-align:right;font-weight:700;">{val}</td></tr>'
-
-def build_html(t1, t2, t3, ph, em, cs, label):
-    return f"""<div style="font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;">
-  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;">
-    <h1 style="margin:0;font-size:20px;">\\U0001F4CA Auto Report</h1>
-    <p style="margin:4px 0 0;font-size:13px;opacity:0.85;">{label}</p>
-    <p style="margin:2px 0 0;font-size:10px;opacity:0.6;">Every {LOOKBACK} hours · Automated via GitHub Actions</p>
-  </div>
-  <div style="background:linear-gradient(135deg,#1565c0,#2196F3);color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;"><strong style="font-size:15px;">\\U0001F535 Tier 1 — Service Desk</strong></div>
-  <div style="background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;">
-    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-      {row("SLA Compliance", f"{fm(t1['sla'])} {ic(t1['sla'],90)}")}
-      {row(f"\\u2514 {t1['sla_met']} met / {t1['sla_missed']} missed", "", True)}
-      {row("Response SLA", f"{fm(t1['resp_sla'])} {ic(t1['resp_sla'],90)}")}
-      {row("Open Breach", f"{t1['breach_rate']}% {ic(t1['breach_rate'],5,True)} ({t1['breach']}/{t1['breach_total']})")}
-      {row("FCR Rate", f"{fm(t1.get('fcr_rate','N/A'))} {ic(t1.get('fcr_rate','N/A'),90)}")}
-      {row("Escalation", f"{fm(t1.get('esc_rate','N/A'))} {ic(t1.get('esc_rate','N/A'),10,True)}")}
-      {row("Total Cases", t1['total'])}
-    </table>
-  </div>
-  <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
-    <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;"><strong style="font-size:12px;color:#2D9D78;">\\U0001F4DE Phone</strong><table style="width:100%;font-size:12px;margin-top:8px;">{row("Total",ph['total'])}{row("Answered",f"<span style=\\"color:#2D9D78\\">{ph['answered']}</span>")}{row("Abandoned",f"<span style=\\"color:#E5544B\\">{ph['abandoned']}</span>")}{row("Rate",f"{fm(ph['rate'])} {ic(ph['rate'],95)}")}</table></td>
-    <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;"><strong style="font-size:12px;color:#2196F3;">\\U0001F4E7 Email</strong><table style="width:100%;font-size:12px;margin-top:8px;">{row("Total",em['total'])}{row("Responded",f"<span style=\\"color:#FF9800\\">{em['responded']}</span>")}{row("Resolved",f"<span style=\\"color:#2D9D78\\">{em['resolved']}</span>")}</table></td>
-  </tr></table>
-  <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
-    <td style="width:50%;vertical-align:top;"><div style="background:linear-gradient(135deg,#e65100,#FF9800);color:#fff;padding:10px 16px;border-radius:10px 10px 0 0;"><strong>\\U0001F7E0 Tier 2</strong></div><div style="background:#fff;padding:12px 16px;border-radius:0 0 10px 10px;"><table style="width:100%;font-size:12px;">{row("SLA",f"{fm(t2['sla'])} {ic(t2['sla'],90)}")}{row("Response",f"{fm(t2['resp_sla'])} {ic(t2['resp_sla'],90)}")}{row("Breach",f"{t2['breach_rate']}% {ic(t2['breach_rate'],5,True)}")}{row("Cases",t2['total'])}{row("Resolved",t2['resolved'])}</table></div></td>
-    <td style="width:50%;vertical-align:top;"><div style="background:linear-gradient(135deg,#7b1fa2,#9C27B0);color:#fff;padding:10px 16px;border-radius:10px 10px 0 0;"><strong>\\U0001F7E3 Tier 3</strong></div><div style="background:#fff;padding:12px 16px;border-radius:0 0 10px 10px;"><table style="width:100%;font-size:12px;">{row("SLA",f"{fm(t3['sla'])} {ic(t3['sla'],90)}")}{row("Response",f"{fm(t3['resp_sla'])} {ic(t3['resp_sla'],90)}")}{row("Breach",f"{t3['breach_rate']}% {ic(t3['breach_rate'],5,True)}")}{row("Cases",t3['total'])}{row("Resolved",t3['resolved'])}</table></div></td>
-  </tr></table>
-  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;">
-    <strong>\\U0001F4C8 OVERALL</strong>
-    <table style="width:100%;margin-top:12px;"><tr>
-      <td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#4FC3F7;">{t1['total']+t2['total']+t3['total']}</div><div style="font-size:10px;color:#a8c6df;">Created</div></td>
-      <td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#81C784;">{t1['resolved']+t2['resolved']+t3['resolved']}</div><div style="font-size:10px;color:#a8c6df;">Resolved</div></td>
-      <td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#81C784;">{ph['answered']}</div><div style="font-size:10px;color:#a8c6df;">Answered</div></td>
-      <td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#f44336;">{ph['abandoned']}</div><div style="font-size:10px;color:#a8c6df;">Abandoned</div></td>
-    </tr></table>
-  </div>
-  <p style="text-align:center;font-size:10px;color:#999;margin-top:16px;">Auto-generated from Dynamics 365 · Service & Operations Dashboard</p>
-</div>"""
-
-# ─── SEND EMAIL ──────────────────────────────────────
-def send_email(html, label):
-    token = get_graph_token()
-    recipients = [{"emailAddress": {"address": e.strip()}} for e in SEND_TO.split(",") if e.strip()]
-    payload = {"message": {"subject": f"\\U0001F4CA Auto Report — {label}", "body": {"contentType": "HTML", "content": html}, "toRecipients": recipients, "from": {"emailAddress": {"address": SEND_FROM}}}}
-    r = requests.post(f"https://graph.microsoft.com/v1.0/users/{SEND_FROM}/sendMail", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload)
-    if r.status_code not in (200, 202): print(f"Email failed ({r.status_code}): {r.text[:300]}"); sys.exit(1)
-    print(f"\\u2705 Email sent to {SEND_TO}")
-
-# ─── MAIN ────────────────────────────────────────────
-def main():
-    print("\\U0001F510 Authenticating D365...")
-    init_d365(get_d365_token())
-    s, e, label = get_range()
-    print(f"\\U0001F4C5 {label}")
-
-    print("\\U0001F4CA Tier 1..."); t1 = fetch_tier(1, "createdon", s, e)
-    fcr = d365_count(f"incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge {s} and createdon le {e}&$count=true&$top=1")
-    esc = d365_count(f"incidents?$filter=casetypecode eq 2 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1")
-    t1["fcr_rate"] = pct(fcr, t1["total"]); t1["esc_rate"] = pct(esc, t1["total"])
-
-    print("\\U0001F4CA Tier 2..."); t2 = fetch_tier(2, "escalatedon", s, e)
-    t2e = d365_count(f"incidents?$filter=casetypecode eq 3 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1")
-    t2["esc_rate"] = pct(t2e, t2["total"])
-
-    print("\\U0001F4CA Tier 3..."); t3 = fetch_tier(3, "escalatedon", s, e)
-
-    print("\\U0001F4DE Phone...")
-    try:
-        pb = f"createdon ge {s} and createdon le {e} and directioncode eq true"
-        pt = d365_count(f"phonecalls?$filter={pb}&$count=true&$top=1")
-        pa = d365_count(f"phonecalls?$filter={pb} and statecode eq 1&$count=true&$top=1")
-        ph = {"total": pt, "answered": pa, "abandoned": pt-pa, "rate": pct(pa, pt)}
-    except: ph = {"total":0,"answered":0,"abandoned":0,"rate":"N/A"}
-
-    print("\\U0001F4E7 Email...")
-    eb = f"caseorigincode eq 2 and createdon ge {s} and createdon le {e}"
-    em = {"total": d365_count(f"incidents?$filter={eb}&$count=true&$top=1"),
-          "responded": d365_count(f"incidents?$filter={eb} and firstresponsesent eq true&$count=true&$top=1"),
-          "resolved": d365_count(f"incidents?$filter={eb} and statecode eq 1&$count=true&$top=1")}
-
-    print("\\u2B50 CSAT...")
-    try:
-        cr = d365_get(f"cr7fe_new_csats?$filter=createdon ge {s} and createdon le {e}&$select=cr7fe_new_rating")
-        sc = [r["cr7fe_new_rating"] for r in cr if r.get("cr7fe_new_rating") is not None]
-        cs = {"count": len(sc), "avg": round(sum(sc)/len(sc),1) if sc else "N/A"}
-    except: cs = {"count":0,"avg":"N/A"}
-
-    html = build_html(t1, t2, t3, ph, em, cs, label)
-    print("\\U0001F4E4 Sending email..."); send_email(html, label)
-    print("\\u2705 Done!")
-
-if __name__ == "__main__": main()
-`;
-
-    const readmeText = "# Auto KPI Report\n\n"
-      + "Automated service desk report — queries D365 every " + intervalHours + " hour(s) and emails results.\n\n"
-      + "## Setup (10 minutes)\n\n"
-      + "### 1. Azure App Registration\n"
-      + "Your existing app (ID: 0918449d...) needs one additional **Application** permission:\n"
-      + "- Go to Azure Portal → App registrations → your app → API permissions\n"
-      + "- Add: **Microsoft Graph → Application → Mail.Send**\n"
-      + "- Click **Grant admin consent**\n\n"
-      + "### 2. GitHub Secrets\n"
-      + "Go to your repo → Settings → Secrets → Actions, add:\n\n"
-      + "| Secret | Value |\n"
-      + "|--------|-------|\n"
-      + "| D365_TENANT_ID | 1b0086bd-aeda-4c74-a15a-23adfe4d0693 |\n"
-      + "| D365_CLIENT_ID | 0918449d-b73e-428a-8238-61723f2a2e7d |\n"
-      + "| D365_CLIENT_SECRET | Your app's client secret |\n"
-      + "| D365_ORG_URL | https://servingintel.crm.dynamics.com |\n"
-      + "| GRAPH_TENANT_ID | (same as D365_TENANT_ID) |\n"
-      + "| GRAPH_CLIENT_ID | (same as D365_CLIENT_ID) |\n"
-      + "| GRAPH_CLIENT_SECRET | (same as D365_CLIENT_SECRET) |\n"
-      + "| SEND_FROM | your-email@servingintel.com |\n\n"
-      + "### 3. Push & Run\n"
-      + "git add . && git commit -m \"auto report\" && git push\n"
-      + "Go to Actions → Auto KPI Report → Run workflow (to test)\n\n"
-      + "## Schedule\n"
-      + "Runs: " + cronLabel + "\n"
-      + "Recipients: " + emails.trim() + "\n"
-      + "Lookback: " + lookbackHours + " hours of data\n";
-
-    // Generate downloadable files using data URIs
-    const files = [
-      { name: ".github/workflows/auto-report.yml", content: workflowYaml },
+    [
+      { name: "auto-report.yml", content: workflowYaml },
       { name: "auto_report.py", content: pythonScript },
       { name: "README.md", content: readmeText },
-    ];
-
-    // Download each file
-    files.forEach((f, i) => {
+    ].forEach((f, i) => {
       setTimeout(() => {
         const blob = new Blob([f.content], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = f.name.split("/").pop(); a.click();
+        a.href = url; a.download = f.name; a.click();
         URL.revokeObjectURL(url);
       }, i * 500);
     });
-
     setGenerating(false);
     setGenerated(true);
   };
 
+  const inputSt = { width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" };
+  const labelSt = { fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 };
+  const subSt = { fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: C.card, borderRadius: 20, width: 520, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+      <div style={{ background: C.card, borderRadius: 20, width: 560, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
         <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}` }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⏰ Auto Report Setup</h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Configure automated reports via GitHub Actions</p>
         </div>
         <div style={{ padding: "20px 28px" }}>
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>📧 Recipient Email(s) *</div>
-            <input type="text" value={emails} onChange={e => setEmails(e.target.value)} placeholder="manager@company.com, team@company.com"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} />
+
+          {/* TIER */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelSt}><span>🏢</span> Tier</div>
+            <select value={selectedTier} onChange={(e) => { setSelectedTier(e.target.value); setAutoMembers([]); }} style={{ ...inputSt, cursor: "pointer", appearance: "auto" }}>
+              <option value="">Select a tier...</option>
+              <option value="all">All Tiers</option>
+              {queues.map(q => <option key={q.id} value={q.id}>{q.tierLabel || q.name}</option>)}
+            </select>
+          </div>
+
+          {/* TEAM MEMBERS */}
+          {selectedTier && selectedTier !== "all" && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={labelSt}><span>👥</span> Team Members {loadingAutoMembers && <span style={{ fontSize: 10, color: C.accent }}>Loading...</span>}</div>
+              <MultiMemberSelect selected={autoMembers} onChange={setAutoMembers} members={autoMembersList} />
+              {autoMembers.length > 0 && <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {autoMembers.slice(0, 4).map(id => { const m = autoMembersList.find(t => t.id === id); return <span key={id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: `${C.accent}15`, color: C.accent, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>{m?.name?.split(" ")[0]}<span onClick={() => setAutoMembers(prev => prev.filter(s => s !== id))} style={{ cursor: "pointer", opacity: 0.6, fontSize: 8 }}>✕</span></span>; })}
+                {autoMembers.length > 4 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: C.bg, color: C.textLight, fontWeight: 600 }}>+{autoMembers.length - 4} more</span>}
+              </div>}
+            </div>
+          )}
+
+          {/* DATE RANGE */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelSt}><span>📅</span> Date Range</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
+              <label><div style={subSt}>From</div><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
+              <label><div style={subSt}>To</div><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <label><div style={subSt}>From Time</div><input type="time" value={fromTime} onChange={e => setFromTime(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
+              <label><div style={subSt}>To Time</div><input type="time" value={toTime} onChange={e => setToTime(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
+            </div>
+            <div style={{ display: "flex", gap: 5 }}>
+              {[{ l: "7D", d: 7 }, { l: "14D", d: 14 }, { l: "30D", d: 30 }, { l: "90D", d: 90 }, { l: "YTD", d: Math.round((new Date() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) }].map(q =>
+                <button key={q.l} onClick={() => setQuickRange(q.d)} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${daysDiff === q.d ? C.accent : C.border}`, background: daysDiff === q.d ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: daysDiff === q.d ? C.accent : C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>
+              )}
+            </div>
+          </div>
+
+          {/* SEND EVERY */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelSt}><span>🔄</span> Send Every</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <input type="number" min="1" max="168" value={intervalHours} onChange={e => setIntervalHours(Math.max(1, parseInt(e.target.value) || 1))}
+                style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
+              <span style={{ fontSize: 13, color: C.textMid, fontWeight: 600 }}>hours</span>
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[{ l: "1h", v: 1 }, { l: "4h", v: 4 }, { l: "8h", v: 8 }, { l: "12h", v: 12 }, { l: "24h", v: 24 }].map(p =>
+                <button key={p.l} onClick={() => setIntervalHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${intervalHours === p.v ? C.accent : C.border}`, background: intervalHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: intervalHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
+              )}
+            </div>
+          </div>
+
+          {/* RECIPIENTS */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelSt}><span>📧</span> Recipient Email(s) *</div>
+            <input type="text" value={emails} onChange={e => setEmails(e.target.value)} placeholder="manager@company.com, team@company.com" style={inputSt} />
             <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>Separate multiple emails with commas</div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>🔄 Send Every</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="number" min="1" max="168" value={intervalHours} onChange={e => setIntervalHours(Math.max(1, parseInt(e.target.value) || 1))}
-                  style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
-                <span style={{ fontSize: 13, color: C.textMid, fontWeight: 600 }}>hours</span>
-              </div>
-              <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-                {[{ l: "1h", v: 1 }, { l: "4h", v: 4 }, { l: "8h", v: 8 }, { l: "12h", v: 12 }, { l: "24h", v: 24 }].map(p =>
-                  <button key={p.l} onClick={() => setIntervalHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${intervalHours === p.v ? C.accent : C.border}`, background: intervalHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: intervalHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
-                )}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>📅 Data Lookback</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="number" min="1" max="720" value={lookbackHours} onChange={e => setLookbackHours(Math.max(1, parseInt(e.target.value) || 1))}
-                  style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
-                <span style={{ fontSize: 13, color: C.textMid, fontWeight: 600 }}>hours</span>
-              </div>
-              <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-                {[{ l: "8h", v: 8 }, { l: "12h", v: 12 }, { l: "24h", v: 24 }, { l: "48h", v: 48 }, { l: "7d", v: 168 }].map(p =>
-                  <button key={p.l} onClick={() => setLookbackHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${lookbackHours === p.v ? C.accent : C.border}`, background: lookbackHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: lookbackHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ background: C.bg, borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+          {/* SUMMARY */}
+          <div style={{ background: C.bg, borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: C.textLight, textTransform: "uppercase", marginBottom: 8 }}>Summary</div>
             <div style={{ fontSize: 12, color: C.textMid, lineHeight: 1.7 }}>
+              <div>🏢 <strong>Tier:</strong> {tierLabel}</div>
+              {autoMembers.length > 0 && <div>👥 <strong>Members:</strong> {memberNames.slice(0, 3).join(", ")}{autoMembers.length > 3 ? ` +${autoMembers.length - 3} more` : ""}</div>}
+              <div>📅 <strong>Date range:</strong> {startDate} to {endDate} ({fromTime} — {toTime})</div>
               <div>🔄 <strong>Frequency:</strong> {cronLabel}</div>
-              <div>📅 <strong>Data window:</strong> Last {lookbackHours} hour{lookbackHours !== 1 ? "s" : ""}</div>
               <div>📧 <strong>Recipients:</strong> {emails || "(enter emails above)"}</div>
-              <div>📊 <strong>Includes:</strong> All tiers SLA, Response SLA, Open Breach, FCR, Phone, Email, CSAT</div>
+              <div>📊 <strong>Includes:</strong> SLA, Response SLA, Open Breach, FCR, Phone, Email, CSAT</div>
             </div>
           </div>
 
@@ -1794,14 +1676,14 @@ if __name__ == "__main__": main()
               ✅ <strong>3 files downloaded!</strong><br/>
               1. <code>auto-report.yml</code> → put in <code>.github/workflows/</code><br/>
               2. <code>auto_report.py</code> → put in repo root<br/>
-              3. <code>README.md</code> → setup instructions + secrets to add
+              3. <code>README.md</code> → setup instructions
             </div>
           )}
         </div>
         <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
-          <button onClick={handleGenerate} disabled={generating || !emails.trim()}
-            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: emails.trim() ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, fontSize: 13, fontWeight: 600, color: emails.trim() ? "#fff" : C.textLight, cursor: emails.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6 }}>
+          <button onClick={handleGenerate} disabled={generating || !emails.trim() || !selectedTier}
+            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: (emails.trim() && selectedTier) ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, fontSize: 13, fontWeight: 600, color: (emails.trim() && selectedTier) ? "#fff" : C.textLight, cursor: (emails.trim() && selectedTier) ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6 }}>
             {generating ? "⏳ Generating..." : "⬇️ Download Auto Report Package"}
           </button>
         </div>
@@ -1809,6 +1691,7 @@ if __name__ == "__main__": main()
     </div>
   );
 }
+
 
 /* ═══════════════════════════════════════════════════════
    MAIN DASHBOARD — SIDEBAR LAYOUT
@@ -2082,7 +1965,7 @@ function Dashboard({ user, onLogout }) {
 `}</style>
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
       <SendReportModal show={showSendModal} onClose={() => setShowSendModal(false)} onSend={handleSendReport} dateLabel={dateLabel} />
-      <AutoReportModal show={showAutoReport} onClose={() => setShowAutoReport(false)} />
+      <AutoReportModal show={showAutoReport} onClose={() => setShowAutoReport(false)} queues={queues} d365Account={d365Account} />
       <div className="no-print dash-header" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
           <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", flexShrink: 0 }}>S</div>
