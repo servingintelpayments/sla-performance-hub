@@ -484,6 +484,39 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   } catch (err) {
     errors.push(`${member.name} — SLA KPI: ${err.message}`);
   }
+
+  // Response SLA KPI
+  let responseMet = 0, responseMissed = 0;
+  try {
+    progress("Fetching Response SLA...");
+    const respData = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$expand=firstresponsebykpiid($select=status)&$top=5000`
+    );
+    for (const rec of (respData.value || [])) {
+      const kpiStatus = rec.firstresponsebykpiid?.status;
+      if (kpiStatus === 4) responseMet++;
+      else if (kpiStatus === 1) responseMissed++;
+    }
+    console.log(`[D365 Response SLA] ${member.name}: met=${responseMet}, missed=${responseMissed}`);
+  } catch (err) {
+    errors.push(`${member.name} — Response SLA: ${err.message}`);
+  }
+
+  // Open SLA Breach (active cases with breached resolution KPI)
+  let openBreachCount = 0, openBreachTotal = 0;
+  try {
+    progress("Fetching Open Breach...");
+    const breachData = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 0 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$expand=resolvebykpiid($select=status)&$top=5000`
+    );
+    openBreachTotal = breachData.value?.length || 0;
+    for (const rec of (breachData.value || [])) {
+      if (rec.resolvebykpiid?.status === 1) openBreachCount++;
+    }
+    console.log(`[D365 Breach] ${member.name}: ${openBreachCount}/${openBreachTotal}`);
+  } catch (err) {
+    errors.push(`${member.name} — Open Breach: ${err.message}`);
+  }
   const fcrCases = await safeFetchCount("FCR",
     `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const escalatedCases = await safeCount("Escalated",
@@ -567,12 +600,16 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
 
   const slaCompliance = (slaMet + slaMissed) > 0 ? Math.min(100, Math.round(slaMet / (slaMet + slaMissed) * 100)) : "N/A";
+  const responseCompliance = (responseMet + responseMissed) > 0 ? Math.min(100, Math.round(responseMet / (responseMet + responseMissed) * 100)) : "N/A";
+  const openBreachRate = openBreachTotal > 0 ? Math.min(100, Math.round(openBreachCount / openBreachTotal * 100)) : 0;
   const fcrRate = totalCases > 0 ? Math.min(100, Math.round(fcrCases / totalCases * 100)) : "N/A";
   const escalationRate = totalCases > 0 ? Math.min(100, Math.round(escalatedCases / totalCases * 100)) : "N/A";
 
   return {
     member,
     totalCases, resolvedCases, activeCases, slaMet, slaMissed, slaCompliance,
+    responseMet, responseMissed, responseCompliance,
+    openBreachCount, openBreachTotal, openBreachRate,
     casesCreatedBy,
     fcrCases, fcrRate, escalatedCases, escalationRate,
     emailCases, emailResolved,
@@ -1055,7 +1092,7 @@ function CTooltip({ active, payload, label }) {
   );
 }
 
-function MetricCard({ label, value, target, unit, inverse, color }) {
+function MetricCard({ label, value, target, unit, inverse, color, sub }) {
   const numVal = parseFloat(value);
   const numTarget = parseFloat(target);
   const isNA = value === "N/A" || (typeof value === "string" && value === "N/A") || (typeof value !== "string" && isNaN(numVal));
@@ -1096,6 +1133,7 @@ function MetricCard({ label, value, target, unit, inverse, color }) {
         <span style={{ fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
         <span style={{ fontSize: 11, color: C.textLight }}>Target: {target}{unit || ""}</span>
       </div>
+      {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
@@ -1256,12 +1294,16 @@ function MemberSection({ memberData, index }) {
   const slaTotal = slaMet + slaMissed;
   const metrics = isTier1 ? [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
+    { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%" },
+    { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active` },
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
     { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
   ] : [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
+    { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%" },
+    { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active` },
     { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
   ];
@@ -2092,6 +2134,99 @@ function Dashboard({ user, onLogout }) {
 
   function buildEmailHTML(recipientNote) {
     if (!data) return "";
+    const ic = (val, target, inv) => val === "N/A" || val === undefined ? "➖" : (inv ? (val < target ? "✅" : "🔴") : (val >= target ? "✅" : "🔴"));
+    const fm = (v) => v === "N/A" || v === undefined ? "N/A" : `${v}%`;
+    const row = (label, val, indent) => `<tr><td style="padding:6px 0;color:#555;${indent ? 'padding-left:14px;font-size:12px;' : ''}">${label}</td><td style="padding:6px 0;text-align:right;font-weight:700;">${val}</td></tr>`;
+    const noteHtml = recipientNote ? `<div style="background:#fff;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#555;border-left:4px solid #6264A7;">💬 ${recipientNote}</div>` : "";
+
+    // ── INDIVIDUAL MEMBER REPORT ──
+    if (memberData && memberData.length > 0) {
+      const colors = ["#1565c0", "#D4853E", "#7b1fa2", "#2D9D78", "#D4A843", "#E91E63", "#00BCD4", "#795548"];
+      let membersHtml = "";
+      for (let i = 0; i < memberData.length; i++) {
+        const d = memberData[i];
+        const m = d.member;
+        const color = colors[i % colors.length];
+        const isTier1 = m.tier === 1;
+        const slaMet = d.slaMet || 0, slaMissed = d.slaMissed || 0, slaTotal = slaMet + slaMissed;
+        membersHtml += `
+  <div style="background:linear-gradient(135deg,${color},${color}DD);color:#fff;padding:18px 24px;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:14;">
+    <div style="width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,0.2);border:2px solid rgba(255,255,255,0.4);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;">${m.avatar || m.name?.substring(0,2)?.toUpperCase()}</div>
+    <div><div style="font-size:18px;font-weight:700;">${m.name}</div><div style="font-size:11px;opacity:0.75;">${m.role || "Agent"}${m.email ? ` · ${m.email}` : ""}</div></div>
+  </div>
+  <div style="background:#fff;padding:16px 20px;margin-bottom:4px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:center;">
+      <tr>
+        <td style="padding:10px 4px;"><div style="font-size:22px;font-weight:700;color:${color};">${d.totalCases}</div><div style="font-size:9px;color:#888;text-transform:uppercase;">Cases Owned</div></td>
+        <td style="padding:10px 4px;"><div style="font-size:22px;font-weight:700;color:#1565c0;">${d.casesCreatedBy ?? "—"}</div><div style="font-size:9px;color:#888;text-transform:uppercase;">Created</div></td>
+        <td style="padding:10px 4px;"><div style="font-size:22px;font-weight:700;color:#2D9D78;">${d.resolvedCases}</div><div style="font-size:9px;color:#888;text-transform:uppercase;">Resolved</div></td>
+        <td style="padding:10px 4px;"><div style="font-size:22px;font-weight:700;color:#1565c0;">${d.activeCases}</div><div style="font-size:9px;color:#888;text-transform:uppercase;">Active</div></td>
+        <td style="padding:10px 4px;"><div style="font-size:22px;font-weight:700;color:${slaMet > 0 ? '#2D9D78' : '#E5544B'};">${slaMet}/${slaTotal}</div><div style="font-size:9px;color:#888;text-transform:uppercase;">SLAs Met</div></td>
+      </tr>
+    </table>
+  </div>
+  <div style="background:#fff;padding:16px 20px;border-radius:0 0 12px 12px;margin-bottom:16px;">
+    <div style="font-size:13px;font-weight:600;color:#333;margin-bottom:10px;">Performance Metrics</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      ${row("SLA Compliance", `${fm(d.slaCompliance)} ${ic(d.slaCompliance, 90, false)}`)}
+      ${row(`↳ ${d.slaMet||0} met · ${d.slaMissed||0} missed`, "", true)}
+      ${row("Response SLA", `${fm(d.responseCompliance)} ${ic(d.responseCompliance, 90, false)}`)}
+      ${row("Open SLA Breach", `${d.openBreachRate||0}% ${ic(d.openBreachRate||0, 5, true)}<br/><span style="font-size:11px;font-weight:normal;color:#888;">${d.openBreachCount||0} of ${d.openBreachTotal||0} active</span>`)}
+      ${isTier1 ? row("First Call Resolution", `${fm(d.fcrRate)} ${ic(d.fcrRate, 90, false)}`) : ""}
+      ${row("Escalation Rate", `${fm(d.escalationRate)} ${ic(d.escalationRate, 10, true)}`)}
+      ${row("Avg Resolution Time", `${d.avgResTime || "N/A"} ⏱️`)}
+      ${isTier1 ? row("CSAT Score", `${d.csatAvg || "N/A"}/5 ${d.csatAvg != null && d.csatAvg !== "N/A" && d.csatAvg >= 4 ? "✅" : (d.csatAvg === "N/A" || d.csatAvg == null ? "➖" : "🔴")}`) : ""}
+    </table>
+    ${isTier1 ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #eee;">
+      <div style="font-size:13px;font-weight:600;color:#E91E63;margin-bottom:8px;">📞 Phone Activity</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        ${row("Total Calls", d.totalPhoneCalls ?? 0)}
+        ${row("Answered", `<span style="color:#2D9D78">${d.answeredLive ?? 0}</span>`)}
+        ${row("Abandoned", `<span style="color:#E5544B">${d.voicemails ?? 0}</span>`)}
+        ${row("Avg AHT", d.memberAHT ?? "N/A")}
+      </table>
+    </div>` : ""}
+  </div>`;
+      }
+
+      // Team summary
+      const totals = memberData.reduce((acc, d) => ({
+        totalCases: acc.totalCases + d.totalCases, resolved: acc.resolved + d.resolvedCases,
+        active: acc.active + d.activeCases, escalated: acc.escalated + (d.escalatedCases || 0),
+        slaMet: acc.slaMet + (d.slaMet || 0), slaMissed: acc.slaMissed + (d.slaMissed || 0), fcrCases: acc.fcrCases + (d.fcrCases || 0),
+      }), { totalCases: 0, resolved: 0, active: 0, escalated: 0, slaMet: 0, slaMissed: 0, fcrCases: 0 });
+      const teamSla = (totals.slaMet + totals.slaMissed) > 0 ? Math.round(totals.slaMet / (totals.slaMet + totals.slaMissed) * 100) : "N/A";
+      const teamFcr = totals.totalCases > 0 ? Math.round(totals.fcrCases / totals.totalCases * 100) : "N/A";
+
+      const tierQueue = selectedQueue ? queues.find(q => q.id === selectedQueue) : null;
+      const tierName = tierQueue?.tierLabel || "Service Desk";
+
+      return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;">
+  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;">
+    <h1 style="margin:0;font-size:20px;">👤 Individual Performance Report</h1>
+    <p style="margin:4px 0 0;font-size:12px;opacity:0.75;">🏢 ${tierName} · 👥 ${memberData.length} member${memberData.length !== 1 ? "s" : ""} · 📅 ${dateLabel}</p>
+  </div>
+  ${noteHtml}
+  ${membersHtml}
+  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;margin-bottom:16px;">
+    <strong style="font-size:13px;">📈 TEAM SUMMARY — ${memberData.length} Member${memberData.length !== 1 ? "s" : ""}</strong>
+    <table style="width:100%;margin-top:12px;"><tr>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#4FC3F7;">${totals.totalCases}</div><div style="font-size:10px;color:#a8c6df;">Total Cases</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#81C784;">${totals.resolved}</div><div style="font-size:10px;color:#a8c6df;">Resolved</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#4FC3F7;">${totals.active}</div><div style="font-size:10px;color:#a8c6df;">Active</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#FF9800;">${totals.escalated}</div><div style="font-size:10px;color:#a8c6df;">Escalated</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#81C784;">${totals.slaMet}</div><div style="font-size:10px;color:#a8c6df;">SLA Met</div></td>
+    </tr></table>
+    <div style="margin-top:12px;display:flex;justify-content:center;gap:12px;">
+      <span style="padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;background:${typeof teamSla === 'number' && teamSla >= 90 ? '#2D9D78' : '#E5544B'};color:#fff;">${fm(teamSla)} Team SLA</span>
+      <span style="padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;background:${typeof teamFcr === 'number' && teamFcr >= 90 ? '#2D9D78' : '#E5544B'};color:#fff;">${fm(teamFcr)} Team FCR</span>
+    </div>
+  </div>
+  <p style="text-align:center;font-size:10px;color:#999;margin-top:16px;">Report generated from live Dynamics 365 data · Service and Operations Dashboard</p>
+</div>`;
+    }
+
+    // ── ALL-TIERS REPORT (no member selection) ──
     const t1 = data.tier1 || {};
     const t2 = data.tier2 || {};
     const t3 = data.tier3 || {};
@@ -2099,16 +2234,13 @@ function Dashboard({ user, onLogout }) {
     const em = data.email || {};
     const cs = data.csat || {};
     const ov = data.overall || {};
-    const ic = (val, target, inv) => val === "N/A" || val === undefined ? "➖" : (inv ? (val < target ? "✅" : "🔴") : (val >= target ? "✅" : "🔴"));
-    const fm = (v) => v === "N/A" || v === undefined ? "N/A" : `${v}%`;
-    const row = (label, val, indent) => `<tr><td style="padding:6px 0;color:#555;${indent ? 'padding-left:14px;font-size:12px;' : ''}">${label}</td><td style="padding:6px 0;text-align:right;font-weight:700;">${val}</td></tr>`;
 
     return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;">
   <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;">
     <h1 style="margin:0;font-size:20px;">📊 Service &amp; Operations Report</h1>
     <p style="margin:4px 0 0;font-size:13px;opacity:0.85;">${dateLabel}</p>
   </div>
-  ${recipientNote ? `<div style="background:#fff;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#555;border-left:4px solid #6264A7;">💬 ${recipientNote}</div>` : ""}
+  ${noteHtml}
   <div style="background:linear-gradient(135deg,#1565c0,#2196F3);color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;">
     <strong style="font-size:15px;">🔵 Tier 1 — Service Desk</strong>
   </div>
@@ -2196,7 +2328,11 @@ function Dashboard({ user, onLogout }) {
     if (!d365Account) throw new Error("Sign in with Microsoft first.");
     const html = buildEmailHTML(recipientNote);
     if (!html) throw new Error("No report data. Run the report first.");
-    const subject = `📊 Service & Operations Report — ${dateLabel}`;
+    const isMemberReport = memberData && memberData.length > 0;
+    const memberNames = isMemberReport ? memberData.map(d => d.member?.name).filter(Boolean).join(", ") : "";
+    const subject = isMemberReport
+      ? `👤 Individual Report: ${memberNames} — ${dateLabel}`
+      : `📊 Service & Operations Report — ${dateLabel}`;
     await sendEmailViaGraph(recipientEmail, subject, html);
     return true;
   };
