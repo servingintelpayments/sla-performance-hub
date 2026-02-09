@@ -147,27 +147,29 @@ const TIERS = {
     color: "#2196F3", colorLight: "#e8f4fd", colorDark: "#1565c0",
     desc: "Front-line support — password resets, basic troubleshooting, general inquiries",
     d365Filter: "casetypecode eq 1", dateField: "createdon",
-    metrics: ["sla_compliance", "fcr_rate", "escalation_rate", "avg_resolution_time", "total_cases"],
+    metrics: ["sla_compliance", "sla_response", "open_breach_rate", "fcr_rate", "escalation_rate", "avg_resolution_time", "total_cases"],
   },
   2: {
     code: 2, label: "Tier 2", name: "Programming Team", icon: "🟠",
     color: "#FF9800", colorLight: "#fff3e0", colorDark: "#e65100",
     desc: "Intermediate support — complex issues, escalations from Tier 1, technical cases",
     d365Filter: "casetypecode eq 2", dateField: "escalatedon",
-    metrics: ["sla_compliance", "escalation_rate", "total_cases", "resolved"],
+    metrics: ["sla_compliance", "sla_response", "open_breach_rate", "escalation_rate", "total_cases", "resolved"],
   },
   3: {
     code: 3, label: "Tier 3", name: "Relationship Managers", icon: "🟣",
     color: "#9C27B0", colorLight: "#f3e5f5", colorDark: "#7b1fa2",
     desc: "Advanced support — critical escalations, system-level issues, VIP accounts",
     d365Filter: "casetypecode eq 3", dateField: "escalatedon",
-    metrics: ["sla_compliance", "total_cases", "resolved"],
+    metrics: ["sla_compliance", "sla_response", "open_breach_rate", "total_cases", "resolved"],
   },
 };
 
 /* ─── REAL SLA TARGETS ─── */
 const TARGETS = {
   sla_compliance: { value: 90, unit: "%", compare: "gte", label: "90%" },
+  sla_response: { value: 90, unit: "%", compare: "gte", label: "90%" },
+  open_breach_rate: { value: 5, unit: "%", compare: "lt", label: "<5%" },
   fcr_rate: { value: 90, unit: "%", compare: "gte", label: "90-95%" },
   escalation_rate: { value: 10, unit: "%", compare: "lt", label: "<10%" },
   answer_rate: { value: 95, unit: "%", compare: "gte", label: ">95%" },
@@ -354,6 +356,20 @@ function generateDemoData(startDate, endDate, selectedMembers) {
   const allResolved = t1Resolved + t2Resolved + t3Resolved;
   const avgResTime = +(1.5 + r(20) * 6).toFixed(1);
 
+  // Demo SLA Response data
+  const t1RespMet = Math.round(t1SLAMet * (0.85 + r(22) * 0.13));
+  const t1RespMissed = Math.round(t1SLAMet * (0.02 + r(23) * 0.08));
+  const t1Active = Math.max(1, t1Cases - t1Resolved);
+  const t1BreachCount = Math.round(t1Active * (0.05 + r(24) * 0.15));
+  const t2RespMet = Math.round(t2Resolved * (0.8 + r(25) * 0.15));
+  const t2RespMissed = Math.round(t2Resolved * (0.03 + r(26) * 0.1));
+  const t2Active = Math.max(1, t2Cases - t2Resolved);
+  const t2BreachCount = Math.round(t2Active * (0.1 + r(27) * 0.2));
+  const t3RespMet = Math.round(t3Resolved * (0.75 + r(28) * 0.2));
+  const t3RespMissed = Math.round(t3Resolved * (0.05 + r(29) * 0.1));
+  const t3Active = Math.max(1, t3Cases - t3Resolved);
+  const t3BreachCount = Math.round(t3Active * (0.15 + r(30) * 0.25));
+
   const timeline = Array.from({ length: Math.min(days + 1, 90) }, (_, i) => {
     const d = new Date(startDate); d.setDate(d.getDate() + i);
     return {
@@ -368,9 +384,9 @@ function generateDemoData(startDate, endDate, selectedMembers) {
   });
 
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: Math.round(t1Cases * (0.05 + r(21) * 0.1)), slaCompliance: t1SLAMet ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + Math.round(t1Cases * (0.05 + r(21) * 0.1))) * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: `${avgResTime} hrs`, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: Math.max(0, t2Resolved - t2SLAMet), slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: Math.max(0, t3Resolved - t3SLAMet), slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A" },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: Math.round(t1Cases * (0.05 + r(21) * 0.1)), slaCompliance: t1SLAMet ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + Math.round(t1Cases * (0.05 + r(21) * 0.1))) * 100)) : 0, slaResponseMet: t1RespMet, slaResponseMissed: t1RespMissed, slaResponseCompliance: (t1RespMet + t1RespMissed) > 0 ? Math.min(100, Math.round(t1RespMet / (t1RespMet + t1RespMissed) * 100)) : "N/A", openBreachCount: t1BreachCount, openBreachTotal: t1Active, openBreachRate: t1Active > 0 ? Math.min(100, Math.round(t1BreachCount / t1Active * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: `${avgResTime} hrs`, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: Math.max(0, t2Resolved - t2SLAMet), slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", slaResponseMet: t2RespMet, slaResponseMissed: t2RespMissed, slaResponseCompliance: (t2RespMet + t2RespMissed) > 0 ? Math.min(100, Math.round(t2RespMet / (t2RespMet + t2RespMissed) * 100)) : "N/A", openBreachCount: t2BreachCount, openBreachTotal: t2Active, openBreachRate: t2Active > 0 ? Math.min(100, Math.round(t2BreachCount / t2Active * 100)) : 0, escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: Math.max(0, t3Resolved - t3SLAMet), slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A", slaResponseMet: t3RespMet, slaResponseMissed: t3RespMissed, slaResponseCompliance: (t3RespMet + t3RespMissed) > 0 ? Math.min(100, Math.round(t3RespMet / (t3RespMet + t3RespMissed) * 100)) : "N/A", openBreachCount: t3BreachCount, openBreachTotal: t3Active, openBreachRate: t3Active > 0 ? Math.min(100, Math.round(t3BreachCount / t3Active * 100)) : 0 },
     phone: { totalCalls, answered, abandoned, answerRate: totalCalls ? Math.min(100, Math.round(answered / totalCalls * 100)) : 0, avgAHT },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : "N/A" },
     csat: { responses: csatResponses, avgScore: csatAvg || "N/A" },
@@ -580,6 +596,48 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     }
   }
 
+  async function safeFetchResponseSLA(label, baseFilter) {
+    try {
+      progress(`Fetching ${label} Response SLA...`);
+      const data = await d365Fetch(
+        `incidents?$filter=${baseFilter}&$select=incidentid&$expand=firstresponsebykpiid($select=status)&$top=5000`
+      );
+      let met = 0, missed = 0;
+      for (const rec of (data.value || [])) {
+        const kpiStatus = rec.firstresponsebykpiid?.status;
+        if (kpiStatus === 4) met++;
+        else if (kpiStatus === 1) missed++;
+      }
+      console.log(`[D365 Response SLA] ${label}: met=${met}, missed=${missed}, total=${data.value?.length || 0}`);
+      return { met, missed };
+    } catch (err) {
+      errors.push(`${label} Response SLA: ${err.message}`);
+      console.error(`[D365 Response SLA] ${label} ERROR:`, err.message);
+      return { met: 0, missed: 0 };
+    }
+  }
+
+  async function safeFetchOpenBreach(label, baseFilter) {
+    try {
+      progress(`Fetching ${label} Open Breaches...`);
+      const data = await d365Fetch(
+        `incidents?$filter=${baseFilter}&$select=incidentid&$expand=resolvebykpiid($select=status)&$top=5000`
+      );
+      let breached = 0, total = 0;
+      for (const rec of (data.value || [])) {
+        total++;
+        const kpiStatus = rec.resolvebykpiid?.status;
+        if (kpiStatus === 1) breached++;
+      }
+      console.log(`[D365 Open Breach] ${label}: breached=${breached}, active=${total}`);
+      return { breached, total };
+    } catch (err) {
+      errors.push(`${label} Open Breach: ${err.message}`);
+      console.error(`[D365 Open Breach] ${label} ERROR:`, err.message);
+      return { breached: 0, total: 0 };
+    }
+  }
+
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const t1Resolved = await safeFetchCount("T1 Resolved",
@@ -588,6 +646,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}`);
   const t1SLAMet = t1SLA.met;
   const t1SLAMissed = t1SLA.missed;
+  const t1ResponseSLA = await safeFetchResponseSLA("T1",
+    `casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}`);
+  const t1OpenBreach = await safeFetchOpenBreach("T1",
+    `casetypecode eq 1 and statecode eq 0 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}`);
   const t1FCR = await safeFetchCount("FCR Cases",
     `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
@@ -601,6 +663,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
   const t2SLAMet = t2SLA.met;
   const t2SLAMissed = t2SLA.missed;
+  const t2ResponseSLA = await safeFetchResponseSLA("T2",
+    `casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
+  const t2OpenBreach = await safeFetchOpenBreach("T2",
+    `casetypecode eq 2 and statecode eq 0 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
 
@@ -612,6 +678,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
   const t3SLAMet = t3SLA.met;
   const t3SLAMissed = t3SLA.missed;
+  const t3ResponseSLA = await safeFetchResponseSLA("T3",
+    `casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
+  const t3OpenBreach = await safeFetchOpenBreach("T3",
+    `casetypecode eq 3 and statecode eq 0 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
 
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
@@ -750,9 +820,9 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
   const allResolved = t1Resolved + t2Resolved + t3Resolved;
 
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: t1SLAMissed, slaCompliance: (t1SLAMet + t1SLAMissed) > 0 ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + t1SLAMissed) * 100)) : "N/A", fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: t2SLAMissed, slaCompliance: (t2SLAMet + t2SLAMissed) > 0 ? Math.min(100, Math.round(t2SLAMet / (t2SLAMet + t2SLAMissed) * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: t3SLAMissed, slaCompliance: (t3SLAMet + t3SLAMissed) > 0 ? Math.min(100, Math.round(t3SLAMet / (t3SLAMet + t3SLAMissed) * 100)) : "N/A" },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: t1SLAMissed, slaCompliance: (t1SLAMet + t1SLAMissed) > 0 ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + t1SLAMissed) * 100)) : "N/A", slaResponseMet: t1ResponseSLA.met, slaResponseMissed: t1ResponseSLA.missed, slaResponseCompliance: (t1ResponseSLA.met + t1ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t1ResponseSLA.met / (t1ResponseSLA.met + t1ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t1OpenBreach.breached, openBreachTotal: t1OpenBreach.total, openBreachRate: t1OpenBreach.total > 0 ? Math.min(100, Math.round(t1OpenBreach.breached / t1OpenBreach.total * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: t2SLAMissed, slaCompliance: (t2SLAMet + t2SLAMissed) > 0 ? Math.min(100, Math.round(t2SLAMet / (t2SLAMet + t2SLAMissed) * 100)) : "N/A", slaResponseMet: t2ResponseSLA.met, slaResponseMissed: t2ResponseSLA.missed, slaResponseCompliance: (t2ResponseSLA.met + t2ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t2ResponseSLA.met / (t2ResponseSLA.met + t2ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t2OpenBreach.breached, openBreachTotal: t2OpenBreach.total, openBreachRate: t2OpenBreach.total > 0 ? Math.min(100, Math.round(t2OpenBreach.breached / t2OpenBreach.total * 100)) : 0, escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: t3SLAMissed, slaCompliance: (t3SLAMet + t3SLAMissed) > 0 ? Math.min(100, Math.round(t3SLAMet / (t3SLAMet + t3SLAMissed) * 100)) : "N/A", slaResponseMet: t3ResponseSLA.met, slaResponseMissed: t3ResponseSLA.missed, slaResponseCompliance: (t3ResponseSLA.met + t3ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t3ResponseSLA.met / (t3ResponseSLA.met + t3ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t3OpenBreach.breached, openBreachTotal: t3OpenBreach.total, openBreachRate: t3OpenBreach.total > 0 ? Math.min(100, Math.round(t3OpenBreach.breached / t3OpenBreach.total * 100)) : 0 },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A") },
     csat: { responses: csatResponses, avgScore: csatAvg },
     phone: { totalCalls: phoneTotal, incoming: phoneTotal, outgoing: 0, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: 0, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
@@ -907,6 +977,8 @@ function TierSection({ tier, data, members }) {
   const slaTotal = slaMet + slaMissed;
   const metrics = [];
   if (t.metrics.includes("sla_compliance")) metrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%" });
+  if (t.metrics.includes("sla_response")) metrics.push({ label: "Response SLA", value: d.slaResponseCompliance, target: 90, unit: "%" });
+  if (t.metrics.includes("open_breach_rate")) metrics.push({ label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: d.openBreachCount > 0 ? `${d.openBreachCount} of ${d.openBreachTotal} active` : null });
   if (t.metrics.includes("fcr_rate")) metrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" });
   if (t.metrics.includes("escalation_rate")) metrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true });
   if (t.metrics.includes("avg_resolution_time")) {
@@ -1003,7 +1075,11 @@ function OverallSummary({ data }) {
 
 function Definitions() {
   const defs = [
-    ["SLA Compliance", "Percentage of resolved cases that met the resolution time target via SLA KPI Instance (Succeeded vs Noncompliant)"],
+    ["SLA Compliance", "Percentage of resolved cases that were completed within the allowed time frame. Formula: SLAs Met ÷ (SLAs Met + SLAs Missed) × 100. Target: 90%"],
+    ["SLAs Met", "Cases that were resolved before the deadline based on their priority level (e.g. High = 24hrs, Normal = 48hrs)"],
+    ["SLAs Missed", "Cases that were resolved but took longer than the allowed time for their priority level"],
+    ["Response SLA", "Percentage of cases where a first response was sent to the customer within the required time frame. Target: 90%"],
+    ["Open SLA Breach", "Percentage of currently active cases that have already exceeded their resolution deadline — these are overdue right now. Target: below 5%"],
     ["FCR Rate", "First Contact Resolution — cases resolved without escalation or follow-up"],
     ["Escalation Rate", "Percentage of Tier 1 cases escalated to Tier 2 or Tier 3"],
     ["Avg Resolution Time", "Mean time from case creation to resolution for closed cases"],
