@@ -350,7 +350,8 @@ function generateDemoData(startDate, endDate, selectedMembers) {
   const csatResponses = Math.round(2 * scale + r(18) * 4 * scale);
   const csatAvg = csatResponses > 0 ? +(3.2 + r(19) * 1.6).toFixed(1) : 0;
   const allCases = t1Cases + t2Cases + t3Cases;
-  const allResolved = t1SLAMet + t2Resolved + t3Resolved;
+  const t1Resolved = t1SLAMet + Math.round(t1Cases * (0.05 + r(21) * 0.1));
+  const allResolved = t1Resolved + t2Resolved + t3Resolved;
   const avgResTime = +(1.5 + r(20) * 6).toFixed(1);
 
   const timeline = Array.from({ length: Math.min(days + 1, 90) }, (_, i) => {
@@ -367,9 +368,9 @@ function generateDemoData(startDate, endDate, selectedMembers) {
   });
 
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.min(100, Math.round(t1SLAMet / t1Cases * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: `${avgResTime} hrs`, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A" },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: Math.round(t1Cases * (0.05 + r(21) * 0.1)), slaCompliance: t1SLAMet ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + Math.round(t1Cases * (0.05 + r(21) * 0.1))) * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: `${avgResTime} hrs`, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: Math.max(0, t2Resolved - t2SLAMet), slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: Math.max(0, t3Resolved - t3SLAMet), slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A" },
     phone: { totalCalls, answered, abandoned, answerRate: totalCalls ? Math.min(100, Math.round(answered / totalCalls * 100)) : 0, avgAHT },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : "N/A" },
     csat: { responses: csatResponses, avgScore: csatAvg || "N/A" },
@@ -410,7 +411,10 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const resolvedCases = await safeFetchCount("Resolved",
     `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const slaMet = resolvedCases;
+  const slaMet = await safeFetchCount("SLA Met",
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const slaMissed = await safeFetchCount("SLA Missed",
+    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and resolvebyslastatus eq 3 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const fcrCases = await safeFetchCount("FCR",
     `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const escalatedCases = await safeCount("Escalated",
@@ -493,13 +497,13 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     }
   } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
 
-  const slaCompliance = totalCases > 0 ? Math.min(100, Math.round(slaMet / totalCases * 100)) : "N/A";
+  const slaCompliance = (slaMet + slaMissed) > 0 ? Math.min(100, Math.round(slaMet / (slaMet + slaMissed) * 100)) : "N/A";
   const fcrRate = totalCases > 0 ? Math.min(100, Math.round(fcrCases / totalCases * 100)) : "N/A";
   const escalationRate = totalCases > 0 ? Math.min(100, Math.round(escalatedCases / totalCases * 100)) : "N/A";
 
   return {
     member,
-    totalCases, resolvedCases, activeCases, slaMet, slaCompliance,
+    totalCases, resolvedCases, activeCases, slaMet, slaMissed, slaCompliance,
     casesCreatedBy,
     fcrCases, fcrRate, escalatedCases, escalationRate,
     emailCases, emailResolved,
@@ -544,8 +548,12 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
 
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
-  const t1SLAMet = await safeFetchCount("SLA Met Cases",
+  const t1Resolved = await safeFetchCount("T1 Resolved",
     `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t1SLAMet = await safeFetchCount("T1 SLA Met",
+    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t1SLAMissed = await safeFetchCount("T1 SLA Missed",
+    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and resolvebyslastatus eq 3 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1FCR = await safeFetchCount("FCR Cases",
     `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
@@ -555,7 +563,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
   const t2Resolved = await safeFetchCount("Tier 2 Resolved",
     `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t2SLAMet = t2Resolved;
+  const t2SLAMet = await safeFetchCount("T2 SLA Met",
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and resolvebyslastatus eq 4 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t2SLAMissed = await safeFetchCount("T2 SLA Missed",
+    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and resolvebyslastatus eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
 
@@ -563,7 +574,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
   const t3Resolved = await safeFetchCount("Tier 3 Resolved",
     `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t3SLAMet = t3Resolved;
+  const t3SLAMet = await safeFetchCount("T3 SLA Met",
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and resolvebyslastatus eq 4 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t3SLAMissed = await safeFetchCount("T3 SLA Missed",
+    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and resolvebyslastatus eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
 
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
@@ -699,12 +713,12 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
   } catch (err) { errors.push(`Timeline: ${err.message}`); }
 
   const allCases = t1Cases + t2Cases + t3Cases;
-  const allResolved = t1SLAMet + t2Resolved + t3Resolved;
+  const allResolved = t1Resolved + t2Resolved + t3Resolved;
 
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaCompliance: t1Cases ? Math.min(100, Math.round(t1SLAMet / t1Cases * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaCompliance: t2Resolved ? Math.min(100, Math.round(t2SLAMet / t2Resolved * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaCompliance: t3Resolved ? Math.min(100, Math.round(t3SLAMet / t3Resolved * 100)) : "N/A" },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: t1SLAMissed, slaCompliance: (t1SLAMet + t1SLAMissed) > 0 ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + t1SLAMissed) * 100)) : "N/A", fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: t2SLAMissed, slaCompliance: (t2SLAMet + t2SLAMissed) > 0 ? Math.min(100, Math.round(t2SLAMet / (t2SLAMet + t2SLAMissed) * 100)) : "N/A", escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: t3SLAMissed, slaCompliance: (t3SLAMet + t3SLAMissed) > 0 ? Math.min(100, Math.round(t3SLAMet / (t3SLAMet + t3SLAMissed) * 100)) : "N/A" },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A") },
     csat: { responses: csatResponses, avgScore: csatAvg },
     phone: { totalCalls: phoneTotal, incoming: phoneTotal, outgoing: 0, answered: phoneAnswered, abandoned: phoneAbandoned, voicemails: 0, answerRate: phoneAnswerRate, avgAHT: phoneAHT },
@@ -854,8 +868,9 @@ function TierSection({ tier, data, members }) {
   const d = data[`tier${tier}`]; if (!d) return null;
   const tierMembers = (members || []).filter(m => m.tier === tier);
   const slaRate = d.slaCompliance;
-  const slaMet = Math.min(d.slaMet || 0, d.total);
-  const slaMissed = Math.max(0, d.total - slaMet);
+  const slaMet = d.slaMet || 0;
+  const slaMissed = d.slaMissed || 0;
+  const slaTotal = slaMet + slaMissed;
   const metrics = [];
   if (t.metrics.includes("sla_compliance")) metrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%" });
   if (t.metrics.includes("fcr_rate")) metrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" });
@@ -886,8 +901,8 @@ function TierSection({ tier, data, members }) {
       </div>
       <div className="stat-row" style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
         <StatCard label={`${t.label} SLA Rate`} value={slaRate === "N/A" ? "N/A" : `${slaRate}%`} color={slaRate !== "N/A" && slaRate >= 90 ? "#2D9D78" : "#E5544B"} />
-        <StatCard label="SLAs Met" value={`${slaMet}/${d.total}`} color="#2D9D78" />
-        <StatCard label="SLAs Missed" value={`${slaMissed}/${d.total}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
+        <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color="#2D9D78" />
+        <StatCard label="SLAs Missed" value={`${slaMissed}/${slaTotal}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
         <StatCard label="Total Cases" value={d.total} color={t.colorDark} />
         <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
       </div>
@@ -954,7 +969,7 @@ function OverallSummary({ data }) {
 
 function Definitions() {
   const defs = [
-    ["SLA Compliance", "Percentage of resolved cases meeting resolution time targets based on priority level"],
+    ["SLA Compliance", "Percentage of resolved cases that met the resolution time target (resolvebyslastatus = Succeeded vs Expired)"],
     ["FCR Rate", "First Contact Resolution — cases resolved without escalation or follow-up"],
     ["Escalation Rate", "Percentage of Tier 1 cases escalated to Tier 2 or Tier 3"],
     ["Avg Resolution Time", "Mean time from case creation to resolution for closed cases"],
@@ -983,8 +998,9 @@ function MemberSection({ memberData, index }) {
   const colors = [C.blue, C.accent, C.purple, "#2D9D78", C.gold, "#E91E63", "#00BCD4", "#795548"];
   const color = colors[index % colors.length];
   const colorDark = color + "DD";
-  const slaMet = Math.min(d.slaMet || 0, d.totalCases);
-  const slaMissed = Math.max(0, d.totalCases - slaMet);
+  const slaMet = d.slaMet || 0;
+  const slaMissed = d.slaMissed || 0;
+  const slaTotal = slaMet + slaMissed;
   const metrics = isTier1 ? [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
@@ -1015,7 +1031,7 @@ function MemberSection({ memberData, index }) {
         <StatCard label="Cases Created" value={d.casesCreatedBy ?? "—"} color={C.blue} />
         <StatCard label="Resolved" value={d.resolvedCases} color="#2D9D78" />
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
-        <StatCard label="SLAs Met" value={`${slaMet}/${d.totalCases}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
+        <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -1038,11 +1054,11 @@ function TeamSummary({ memberDataList }) {
   const totals = memberDataList.reduce((acc, d) => ({
     totalCases: acc.totalCases + d.totalCases, resolved: acc.resolved + d.resolvedCases,
     active: acc.active + d.activeCases, escalated: acc.escalated + d.escalatedCases,
-    slaMet: acc.slaMet + d.slaMet, fcrCases: acc.fcrCases + d.fcrCases,
+    slaMet: acc.slaMet + d.slaMet, slaMissed: acc.slaMissed + (d.slaMissed || 0), fcrCases: acc.fcrCases + d.fcrCases,
     emailCases: acc.emailCases + d.emailCases, emailResolved: acc.emailResolved + d.emailResolved,
     csatResponses: acc.csatResponses + d.csatResponses,
     csatTotal: acc.csatTotal + (d.csatAvg !== "N/A" ? d.csatAvg * d.csatResponses : 0),
-  }), { totalCases: 0, resolved: 0, active: 0, escalated: 0, slaMet: 0, fcrCases: 0, emailCases: 0, emailResolved: 0, csatResponses: 0, csatTotal: 0 });
+  }), { totalCases: 0, resolved: 0, active: 0, escalated: 0, slaMet: 0, slaMissed: 0, fcrCases: 0, emailCases: 0, emailResolved: 0, csatResponses: 0, csatTotal: 0 });
   const items = [
     { label: "Total Cases", value: totals.totalCases, color: "#4FC3F7" },
     { label: "Resolved", value: totals.resolved, color: "#81C784" },
@@ -1058,7 +1074,7 @@ function TeamSummary({ memberDataList }) {
       </div>
       {totals.totalCases > 0 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("sla_compliance", totals.totalCases ? Math.min(100, Math.round(totals.slaMet / totals.totalCases * 100)) : 0)} value={totals.totalCases ? Math.min(100, Math.round(totals.slaMet / totals.totalCases * 100)) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div></div>
+          <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("sla_compliance", (totals.slaMet + totals.slaMissed) > 0 ? Math.min(100, Math.round(totals.slaMet / (totals.slaMet + totals.slaMissed) * 100)) : 0)} value={(totals.slaMet + totals.slaMissed) > 0 ? Math.min(100, Math.round(totals.slaMet / (totals.slaMet + totals.slaMissed) * 100)) : "N/A"} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team SLA</div></div>
           <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("fcr_rate", totals.totalCases ? Math.min(100, Math.round(totals.fcrCases / totals.totalCases * 100)) : 0)} value={totals.totalCases ? Math.min(100, Math.round(totals.fcrCases / totals.totalCases * 100)) : 0} unit="%" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team FCR</div></div>
           {totals.csatResponses > 0 && <div style={{ textAlign: "center" }}><StatusBadge status={checkTarget("csat_score", +(totals.csatTotal / totals.csatResponses).toFixed(1))} value={+(totals.csatTotal / totals.csatResponses).toFixed(1)} unit="/5" /><div style={{ fontSize: 10, color: "#a8c6df", marginTop: 4 }}>Team CSAT</div></div>}
         </div>
