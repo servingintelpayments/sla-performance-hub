@@ -411,10 +411,23 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const resolvedCases = await safeFetchCount("Resolved",
     `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const slaMet = await safeFetchCount("SLA Met",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const slaMissed = await safeFetchCount("SLA Missed",
-    `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and resolvebyslastatus eq 3 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
+
+  // Fetch SLA KPI Instance status via $expand on resolved cases
+  let slaMet = 0, slaMissed = 0;
+  try {
+    progress("Fetching SLA KPI...");
+    const slaData = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$expand=resolvebykpiid($select=status)&$top=5000`
+    );
+    for (const rec of (slaData.value || [])) {
+      const kpiStatus = rec.resolvebykpiid?.status;
+      if (kpiStatus === 4) slaMet++;
+      else if (kpiStatus === 1) slaMissed++;
+    }
+    console.log(`[D365 SLA] ${member.name}: met=${slaMet}, missed=${slaMissed}`);
+  } catch (err) {
+    errors.push(`${member.name} — SLA KPI: ${err.message}`);
+  }
   const fcrCases = await safeFetchCount("FCR",
     `incidents?$filter=_ownerid_value eq ${oid} and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const escalatedCases = await safeCount("Escalated",
@@ -546,14 +559,35 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     }
   }
 
+  async function safeFetchSLA(label, baseFilter) {
+    try {
+      progress(`Fetching ${label} SLA...`);
+      const data = await d365Fetch(
+        `incidents?$filter=${baseFilter}&$select=incidentid&$expand=resolvebykpiid($select=status)&$top=5000`
+      );
+      let met = 0, missed = 0;
+      for (const rec of (data.value || [])) {
+        const kpiStatus = rec.resolvebykpiid?.status;
+        if (kpiStatus === 4) met++;
+        else if (kpiStatus === 1) missed++;
+      }
+      console.log(`[D365 SLA] ${label}: met=${met}, missed=${missed}, total=${data.value?.length || 0}`);
+      return { met, missed };
+    } catch (err) {
+      errors.push(`${label} SLA: ${err.message}`);
+      console.error(`[D365 SLA] ${label} ERROR:`, err.message);
+      return { met: 0, missed: 0 };
+    }
+  }
+
   const t1Cases = await safeCount("Tier 1 Cases",
     `incidents?$filter=casetypecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
   const t1Resolved = await safeFetchCount("T1 Resolved",
     `incidents?$filter=casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t1SLAMet = await safeFetchCount("T1 SLA Met",
-    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and resolvebyslastatus eq 4 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t1SLAMissed = await safeFetchCount("T1 SLA Missed",
-    `incidents?$filter=casetypecode eq 1 and statecode eq 1 and resolvebyslastatus eq 3 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t1SLA = await safeFetchSLA("T1",
+    `casetypecode eq 1 and statecode eq 1 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}`);
+  const t1SLAMet = t1SLA.met;
+  const t1SLAMissed = t1SLA.missed;
   const t1FCR = await safeFetchCount("FCR Cases",
     `incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid&$count=true`);
   const t1Escalated = await safeCount("Tier 1 Escalated",
@@ -563,10 +597,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `incidents?$filter=casetypecode eq 2 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
   const t2Resolved = await safeFetchCount("Tier 2 Resolved",
     `incidents?$filter=casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t2SLAMet = await safeFetchCount("T2 SLA Met",
-    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and resolvebyslastatus eq 4 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t2SLAMissed = await safeFetchCount("T2 SLA Missed",
-    `incidents?$filter=casetypecode eq 2 and statecode eq 1 and resolvebyslastatus eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t2SLA = await safeFetchSLA("T2",
+    `casetypecode eq 2 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
+  const t2SLAMet = t2SLA.met;
+  const t2SLAMissed = t2SLA.missed;
   const t2Escalated = await safeCount("Tier 2 Escalated to T3",
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
 
@@ -574,10 +608,10 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     `incidents?$filter=casetypecode eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$count=true&$top=1`);
   const t3Resolved = await safeFetchCount("Tier 3 Resolved",
     `incidents?$filter=casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t3SLAMet = await safeFetchCount("T3 SLA Met",
-    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and resolvebyslastatus eq 4 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
-  const t3SLAMissed = await safeFetchCount("T3 SLA Missed",
-    `incidents?$filter=casetypecode eq 3 and statecode eq 1 and resolvebyslastatus eq 3 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}&$select=incidentid&$count=true`);
+  const t3SLA = await safeFetchSLA("T3",
+    `casetypecode eq 3 and statecode eq 1 and escalatedon ge ${s}T${sT} and escalatedon le ${e}T${eT}`);
+  const t3SLAMet = t3SLA.met;
+  const t3SLAMissed = t3SLA.missed;
 
   const emailCases = await safeCount("Email Cases",
     `incidents?$filter=caseorigincode eq 2 and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$count=true&$top=1`);
@@ -969,7 +1003,7 @@ function OverallSummary({ data }) {
 
 function Definitions() {
   const defs = [
-    ["SLA Compliance", "Percentage of resolved cases that met the resolution time target (resolvebyslastatus = Succeeded vs Expired)"],
+    ["SLA Compliance", "Percentage of resolved cases that met the resolution time target via SLA KPI Instance (Succeeded vs Noncompliant)"],
     ["FCR Rate", "First Contact Resolution — cases resolved without escalation or follow-up"],
     ["Escalation Rate", "Percentage of Tier 1 cases escalated to Tier 2 or Tier 3"],
     ["Avg Resolution Time", "Mean time from case creation to resolution for closed cases"],
