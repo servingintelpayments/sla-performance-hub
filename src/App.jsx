@@ -27,6 +27,7 @@ const MSAL_CONFIG = {
 
 const D365_SCOPE = "https://servingintel.crm.dynamics.com/user_impersonation";
 const D365_BASE = "https://servingintel.crm.dynamics.com/api/data/v9.2";
+const GRAPH_SCOPE = "Mail.Send";
 
 let msalInstance = null;
 function getMsal() {
@@ -57,6 +58,45 @@ async function getD365Token() {
     }
     return null;
   }
+}
+
+/* ─── GRAPH API TOKEN (for sending email) ─── */
+async function getGraphToken() {
+  const msal = getMsal();
+  await msal.initialize();
+  const accounts = msal.getAllAccounts();
+  if (accounts.length === 0) throw new Error("Not signed in. Sign in with Microsoft first.");
+  try {
+    const result = await msal.acquireTokenSilent({ scopes: [GRAPH_SCOPE], account: accounts[0] });
+    return result.accessToken;
+  } catch (err) {
+    if (err instanceof InteractionRequiredAuthError) {
+      const result = await msal.acquireTokenPopup({ scopes: [GRAPH_SCOPE] });
+      return result.accessToken;
+    }
+    throw err;
+  }
+}
+
+/* ─── SEND EMAIL VIA GRAPH API ─── */
+async function sendEmailViaGraph(to, subject, htmlBody) {
+  const token = await getGraphToken();
+  const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: {
+        subject,
+        body: { contentType: "HTML", content: htmlBody },
+        toRecipients: to.split(",").map(e => ({ emailAddress: { address: e.trim() } })),
+      },
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Email failed (${res.status}): ${txt.substring(0, 200)}`);
+  }
+  return true;
 }
 
 async function msalLogin() {
@@ -1316,10 +1356,84 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
               {d365Status && !d365Status.success && (<div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: C.redLight, color: C.red }}>❌ {d365Status.error}</div>)}
             </div>
           )}
+          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, marginTop: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: "#0078D4", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>✉️</div>
+              <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>Email Reports</div><div style={{ fontSize: 10, color: C.textMid }}>Send reports via Microsoft Graph API using your signed-in account</div></div>
+            </div>
+            <div style={{ fontSize: 11, color: C.textMid, lineHeight: 1.6, padding: "8px 12px", background: C.bg, borderRadius: 8 }}>
+              ✅ Uses your Microsoft sign-in to send emails directly — no Power Automate needed.<br/>
+              💡 Requires <strong>Mail.Send</strong> permission on your Azure App Registration. A consent popup will appear on first use.
+            </div>
+          </div>
         </div>
         <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
           <button onClick={() => { onSave(local); onClose(); }} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: C.primary, fontSize: 13, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SendReportModal({ show, onClose, onSend, dateLabel }) {
+  const [email, setEmail] = useState("");
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState(null); // null | "sending" | "sent" | "error"
+  const [error, setError] = useState("");
+
+  if (!show) return null;
+
+  const handleSend = async () => {
+    if (!email.trim() || !email.includes("@")) { setError("Enter a valid email address"); return; }
+    setStatus("sending"); setError("");
+    try {
+      await onSend(email.trim(), note.trim());
+      setStatus("sent");
+      setTimeout(() => { onClose(); setStatus(null); setEmail(""); setNote(""); }, 2000);
+    } catch (err) {
+      setStatus("error"); setError(err.message);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 20, width: 480, boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+        <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}` }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>📤 Send Report via Email</h2>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>{dateLabel}</p>
+        </div>
+        <div style={{ padding: "20px 28px" }}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>Recipient Email(s) *</div>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="manager@company.com, team@company.com"
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${error && !email.includes("@") ? "#E5544B" : C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} />
+            <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>Separate multiple emails with commas</div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>Note <span style={{ fontWeight: 400, color: C.textLight }}>(optional)</span></div>
+            <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note to the email..." rows={3}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+          </div>
+          {status === "sent" && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, background: C.greenLight, fontSize: 12, fontWeight: 600, color: C.green, textAlign: "center", marginBottom: 12 }}>✅ Report sent successfully!</div>
+          )}
+          {status === "error" && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, background: C.redLight, fontSize: 12, fontWeight: 600, color: C.red, marginBottom: 12 }}>❌ {error}</div>
+          )}
+          <div style={{ background: C.bg, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: C.textLight, textTransform: "uppercase", marginBottom: 6 }}>How It Works</div>
+            <div style={{ fontSize: 11, color: C.textMid, lineHeight: 1.6 }}>
+              Sends a styled HTML email directly from your Microsoft account via Graph API. Includes all Tier 1–3 metrics, Phone, Email, CSAT, and Overall Summary.
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button onClick={() => { onClose(); setStatus(null); setError(""); }} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleSend} disabled={status === "sending" || status === "sent"}
+            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: status === "sent" ? C.green : `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, fontSize: 13, fontWeight: 600, color: "#fff", cursor: status === "sending" ? "wait" : "pointer", opacity: status === "sending" ? 0.7 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+            {status === "sending" ? "⏳ Sending..." : status === "sent" ? "✅ Sent!" : "📤 Send Report"}
+          </button>
         </div>
       </div>
     </div>
@@ -1346,6 +1460,7 @@ function Dashboard({ user, onLogout }) {
   const [isRunning, setIsRunning] = useState(false);
   const [runProgress, setRunProgress] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showSendModal, setShowSendModal] = useState(false);
   const [apiConfig, setApiConfig] = useState({ live: true });
   const [d365Account, setD365Account] = useState(null);
   const [liveErrors, setLiveErrors] = useState([]);
@@ -1454,6 +1569,117 @@ function Dashboard({ user, onLogout }) {
 
   const handleExportPDF = () => { if (reportRef.current) window.print(); };
 
+  function buildEmailHTML(recipientNote) {
+    if (!data) return "";
+    const t1 = data.tier1 || {};
+    const t2 = data.tier2 || {};
+    const t3 = data.tier3 || {};
+    const ph = data.phone || {};
+    const em = data.email || {};
+    const cs = data.csat || {};
+    const ov = data.overall || {};
+    const ic = (val, target, inv) => val === "N/A" || val === undefined ? "➖" : (inv ? (val < target ? "✅" : "🔴") : (val >= target ? "✅" : "🔴"));
+    const fm = (v) => v === "N/A" || v === undefined ? "N/A" : `${v}%`;
+    const row = (label, val, indent) => `<tr><td style="padding:6px 0;color:#555;${indent ? 'padding-left:14px;font-size:12px;' : ''}">${label}</td><td style="padding:6px 0;text-align:right;font-weight:700;">${val}</td></tr>`;
+
+    return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;">
+  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;">
+    <h1 style="margin:0;font-size:20px;">📊 Service &amp; Operations Report</h1>
+    <p style="margin:4px 0 0;font-size:13px;opacity:0.85;">${dateLabel}</p>
+  </div>
+  ${recipientNote ? `<div style="background:#fff;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#555;border-left:4px solid #6264A7;">💬 ${recipientNote}</div>` : ""}
+  <div style="background:linear-gradient(135deg,#1565c0,#2196F3);color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;">
+    <strong style="font-size:15px;">🔵 Tier 1 — Service Desk</strong>
+  </div>
+  <div style="background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      ${row("SLA Compliance", `${fm(t1.slaCompliance)} ${ic(t1.slaCompliance, 90, false)}`)}
+      ${row(`↳ ${t1.slaMet||0} met · ${t1.slaMissed||0} missed of ${(t1.slaMet||0)+(t1.slaMissed||0)} evaluated`, "", true)}
+      ${row("Response SLA", `${fm(t1.slaResponseCompliance)} ${ic(t1.slaResponseCompliance, 90, false)}`)}
+      ${row("Open SLA Breach", `${t1.openBreachRate||0}% ${ic(t1.openBreachRate||0, 5, true)}<br/><span style="font-size:11px;font-weight:normal;color:#888;">${t1.openBreachCount||0} of ${t1.openBreachTotal||0} active</span>`)}
+      ${row("FCR Rate", `${fm(t1.fcrRate)} ${ic(t1.fcrRate, 90, false)}`)}
+      ${row("Escalation Rate", `${fm(t1.escalationRate)} ${ic(t1.escalationRate, 10, true)}`)}
+      ${row("Avg Resolution Time", `${t1.avgResolutionTime || "N/A"} ⏱️`)}
+      ${row("Total Cases", t1.total || 0)}
+      ${row("CSAT Score", `${cs.avgScore || "N/A"}/5 ${cs.avgScore != null && cs.avgScore !== "N/A" && cs.avgScore >= 4 ? "✅" : (cs.avgScore === "N/A" ? "➖" : "🔴")}`)}
+    </table>
+  </div>
+
+  <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
+    <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;">
+      <strong style="font-size:12px;color:#2D9D78;">📞 Phone</strong>
+      <table style="width:100%;font-size:12px;margin-top:8px;">
+        ${row("Total", ph.totalCalls||0)}
+        ${row("Answered", `<span style="color:#2D9D78">${ph.answered||0}</span>`)}
+        ${row("Abandoned", `<span style="color:#E5544B">${ph.abandoned||0}</span>`)}
+        ${row("Answer Rate", `${fm(ph.answerRate)} ${ic(ph.answerRate, 95, false)}`)}
+        ${row("Avg AHT", `${ph.avgAHT||0} min`)}
+      </table>
+    </td>
+    <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;">
+      <strong style="font-size:12px;color:#2196F3;">📧 Email</strong>
+      <table style="width:100%;font-size:12px;margin-top:8px;">
+        ${row("Total", em.total||0)}
+        ${row("Responded", `<span style="color:#FF9800">${em.responded||0}</span>`)}
+        ${row("Resolved", `<span style="color:#2D9D78">${em.resolved||0}</span>`)}
+      </table>
+    </td>
+  </tr></table>
+
+  <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
+    <td style="width:50%;vertical-align:top;">
+      <div style="background:linear-gradient(135deg,#e65100,#FF9800);color:#fff;padding:10px 16px;border-radius:10px 10px 0 0;">
+        <strong style="font-size:13px;">🟠 Tier 2 — Programming</strong>
+      </div>
+      <div style="background:#fff;padding:12px 16px;border-radius:0 0 10px 10px;">
+        <table style="width:100%;font-size:12px;">
+          ${row("SLA", `${fm(t2.slaCompliance)} ${ic(t2.slaCompliance, 90, false)}`)}
+          ${row("Response SLA", `${fm(t2.slaResponseCompliance)} ${ic(t2.slaResponseCompliance, 90, false)}`)}
+          ${row("Breach", `${t2.openBreachRate||0}% ${ic(t2.openBreachRate||0, 5, true)}`)}
+          ${row("Cases", t2.total||0)}
+          ${row("Resolved", t2.resolved||0)}
+        </table>
+      </div>
+    </td>
+    <td style="width:50%;vertical-align:top;">
+      <div style="background:linear-gradient(135deg,#7b1fa2,#9C27B0);color:#fff;padding:10px 16px;border-radius:10px 10px 0 0;">
+        <strong style="font-size:13px;">🟣 Tier 3 — Relationship Mgrs</strong>
+      </div>
+      <div style="background:#fff;padding:12px 16px;border-radius:0 0 10px 10px;">
+        <table style="width:100%;font-size:12px;">
+          ${row("SLA", `${fm(t3.slaCompliance)} ${ic(t3.slaCompliance, 90, false)}`)}
+          ${row("Response SLA", `${fm(t3.slaResponseCompliance)} ${ic(t3.slaResponseCompliance, 90, false)}`)}
+          ${row("Breach", `${t3.openBreachRate||0}% ${ic(t3.openBreachRate||0, 5, true)}`)}
+          ${row("Cases", t3.total||0)}
+          ${row("Resolved", t3.resolved||0)}
+        </table>
+      </div>
+    </td>
+  </tr></table>
+
+  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;">
+    <strong style="font-size:13px;">📈 OVERALL SUMMARY</strong>
+    <table style="width:100%;margin-top:12px;"><tr>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#4FC3F7;">${ov.created||0}</div><div style="font-size:10px;color:#a8c6df;">Created</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#81C784;">${ov.resolved||0}</div><div style="font-size:10px;color:#a8c6df;">Resolved</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#FFB74D;">${cs.responses||0}</div><div style="font-size:10px;color:#a8c6df;">CSAT</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#81C784;">${ph.answered||0}</div><div style="font-size:10px;color:#a8c6df;">Answered</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#f44336;">${ph.abandoned||0}</div><div style="font-size:10px;color:#a8c6df;">Abandoned</div></td>
+    </tr></table>
+  </div>
+  <p style="text-align:center;font-size:10px;color:#999;margin-top:16px;">Report generated from live Dynamics 365 data · Service and Operations Dashboard</p>
+</div>`;
+  }
+
+  const handleSendReport = async (recipientEmail, recipientNote) => {
+    if (!d365Account) throw new Error("Sign in with Microsoft first.");
+    const html = buildEmailHTML(recipientNote);
+    if (!html) throw new Error("No report data. Run the report first.");
+    const subject = `📊 Service & Operations Report — ${dateLabel}`;
+    await sendEmailViaGraph(recipientEmail, subject, html);
+    return true;
+  };
+
   const timeLabel = (startTime !== "00:00" || endTime !== "23:59") ? ` · ${startTime} — ${endTime}` : "";
   const dateLabel = startDate === endDate
     ? new Date(startDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) + timeLabel
@@ -1484,6 +1710,7 @@ function Dashboard({ user, onLogout }) {
 }
 `}</style>
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
+      <SendReportModal show={showSendModal} onClose={() => setShowSendModal(false)} onSend={handleSendReport} dateLabel={dateLabel} />
       <div className="no-print dash-header" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
           <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", flexShrink: 0 }}>S</div>
@@ -1493,6 +1720,7 @@ function Dashboard({ user, onLogout }) {
           <span style={{ fontSize: 13, color: "#ffffff80", fontWeight: 500, whiteSpace: "nowrap" }}>👤 {user?.name || "User"}</span>
           {d365Account && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: "#4CAF5030", color: "#81C784", fontWeight: 600 }}>🟢 D365</span>}
           {hasRun && <button onClick={handleExportPDF} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}><span>📄</span> Export PDF</button>}
+          {hasRun && d365Account && <button onClick={() => setShowSendModal(true)} style={{ background: "linear-gradient(135deg, #0078D440, #0078D420)", color: "#fff", border: "1px solid #0078D450", borderRadius: 8, padding: "8px 18px", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}><span>📤</span> Send</button>}
           <button onClick={() => setShowSettings(true)} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 14px", fontSize: 14, cursor: "pointer" }}>⚙️</button>
           <button onClick={onLogout} style={{ background: "linear-gradient(135deg, #fff2, #fff1)", color: "#fff", border: "1px solid #fff3", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Logout</button>
         </div>
@@ -1541,6 +1769,7 @@ function Dashboard({ user, onLogout }) {
           </button>
           {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a tier to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
+          {hasRun && <button onClick={() => setShowSendModal(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${d365Account ? "#0078D4" : C.border}`, background: d365Account ? "#0078D410" : C.card, color: d365Account ? "#0078D4" : C.textLight, fontSize: 13, fontWeight: 600, cursor: d365Account ? "pointer" : "not-allowed", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📤</span> Send Report{!d365Account && <span style={{ fontSize: 9, opacity: 0.7 }}>(sign in first)</span>}</button>}
         </div>
         <div className="dash-main" style={{ flex: 1, padding: "24px 28px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
           {!hasRun ? (
