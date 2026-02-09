@@ -1685,41 +1685,33 @@ def main():
 if __name__ == "__main__": main()
 `;
 
-    const readmeText = \`# Auto KPI Report
-
-Automated service desk report — queries D365 every ${intervalHours} hour(s) and emails results.
-
-## Setup (10 minutes)
-
-### 1. Azure App Registration
-Your existing app (ID: 0918449d...) needs one additional **Application** permission:
-- Go to Azure Portal → App registrations → your app → API permissions
-- Add: **Microsoft Graph → Application → Mail.Send**
-- Click **Grant admin consent**
-
-### 2. GitHub Secrets
-Go to your repo → Settings → Secrets → Actions, add:
-
-| Secret | Value |
-|--------|-------|
-| D365_TENANT_ID | 1b0086bd-aeda-4c74-a15a-23adfe4d0693 |
-| D365_CLIENT_ID | 0918449d-b73e-428a-8238-61723f2a2e7d |
-| D365_CLIENT_SECRET | Your app's client secret |
-| D365_ORG_URL | https://servingintel.crm.dynamics.com |
-| GRAPH_TENANT_ID | (same as D365_TENANT_ID) |
-| GRAPH_CLIENT_ID | (same as D365_CLIENT_ID) |
-| GRAPH_CLIENT_SECRET | (same as D365_CLIENT_SECRET) |
-| SEND_FROM | your-email@servingintel.com |
-
-### 3. Push & Run
-git add . && git commit -m "auto report" && git push
-Go to Actions → Auto KPI Report → Run workflow (to test)
-
-## Schedule
-Runs: ${cronLabel}
-Recipients: ${emails.trim()}
-Lookback: ${lookbackHours} hours of data
-\`;
+    const readmeText = "# Auto KPI Report\n\n"
+      + "Automated service desk report — queries D365 every " + intervalHours + " hour(s) and emails results.\n\n"
+      + "## Setup (10 minutes)\n\n"
+      + "### 1. Azure App Registration\n"
+      + "Your existing app (ID: 0918449d...) needs one additional **Application** permission:\n"
+      + "- Go to Azure Portal → App registrations → your app → API permissions\n"
+      + "- Add: **Microsoft Graph → Application → Mail.Send**\n"
+      + "- Click **Grant admin consent**\n\n"
+      + "### 2. GitHub Secrets\n"
+      + "Go to your repo → Settings → Secrets → Actions, add:\n\n"
+      + "| Secret | Value |\n"
+      + "|--------|-------|\n"
+      + "| D365_TENANT_ID | 1b0086bd-aeda-4c74-a15a-23adfe4d0693 |\n"
+      + "| D365_CLIENT_ID | 0918449d-b73e-428a-8238-61723f2a2e7d |\n"
+      + "| D365_CLIENT_SECRET | Your app's client secret |\n"
+      + "| D365_ORG_URL | https://servingintel.crm.dynamics.com |\n"
+      + "| GRAPH_TENANT_ID | (same as D365_TENANT_ID) |\n"
+      + "| GRAPH_CLIENT_ID | (same as D365_CLIENT_ID) |\n"
+      + "| GRAPH_CLIENT_SECRET | (same as D365_CLIENT_SECRET) |\n"
+      + "| SEND_FROM | your-email@servingintel.com |\n\n"
+      + "### 3. Push & Run\n"
+      + "git add . && git commit -m \"auto report\" && git push\n"
+      + "Go to Actions → Auto KPI Report → Run workflow (to test)\n\n"
+      + "## Schedule\n"
+      + "Runs: " + cronLabel + "\n"
+      + "Recipients: " + emails.trim() + "\n"
+      + "Lookback: " + lookbackHours + " hours of data\n";
 
     // Generate downloadable files using data URIs
     const files = [
@@ -1746,7 +1738,7 @@ Lookback: ${lookbackHours} hours of data
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: C.card, borderRadius: 20, width: 520, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
-        <div style={{ padding: "24px 28px 16px", borderBottom: \`1px solid \${C.border}\` }}>
+        <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}` }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⏰ Auto Report Setup</h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Configure automated reports via GitHub Actions</p>
         </div>
@@ -1754,7 +1746,7 @@ Lookback: ${lookbackHours} hours of data
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>📧 Recipient Email(s) *</div>
             <input type="text" value={emails} onChange={e => setEmails(e.target.value)} placeholder="manager@company.com, team@company.com"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: \`1.5px solid \${C.border}\`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} />
             <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>Separate multiple emails with commas</div>
           </div>
 
@@ -1763,12 +1755,12 @@ Lookback: ${lookbackHours} hours of data
               <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>🔄 Send Every</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="number" min="1" max="168" value={intervalHours} onChange={e => setIntervalHours(Math.max(1, parseInt(e.target.value) || 1))}
-                  style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: \`1.5px solid \${C.border}\`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
+                  style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
                 <span style={{ fontSize: 13, color: C.textMid, fontWeight: 600 }}>hours</span>
               </div>
               <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                 {[{ l: "1h", v: 1 }, { l: "4h", v: 4 }, { l: "8h", v: 8 }, { l: "12h", v: 12 }, { l: "24h", v: 24 }].map(p =>
-                  <button key={p.l} onClick={() => setIntervalHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: \`1px solid \${intervalHours === p.v ? C.accent : C.border}\`, background: intervalHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: intervalHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
+                  <button key={p.l} onClick={() => setIntervalHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${intervalHours === p.v ? C.accent : C.border}`, background: intervalHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: intervalHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
                 )}
               </div>
             </div>
@@ -1776,12 +1768,12 @@ Lookback: ${lookbackHours} hours of data
               <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>📅 Data Lookback</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="number" min="1" max="720" value={lookbackHours} onChange={e => setLookbackHours(Math.max(1, parseInt(e.target.value) || 1))}
-                  style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: \`1.5px solid \${C.border}\`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
+                  style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
                 <span style={{ fontSize: 13, color: C.textMid, fontWeight: 600 }}>hours</span>
               </div>
               <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                 {[{ l: "8h", v: 8 }, { l: "12h", v: 12 }, { l: "24h", v: 24 }, { l: "48h", v: 48 }, { l: "7d", v: 168 }].map(p =>
-                  <button key={p.l} onClick={() => setLookbackHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: \`1px solid \${lookbackHours === p.v ? C.accent : C.border}\`, background: lookbackHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: lookbackHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
+                  <button key={p.l} onClick={() => setLookbackHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${lookbackHours === p.v ? C.accent : C.border}`, background: lookbackHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: lookbackHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
                 )}
               </div>
             </div>
@@ -1806,10 +1798,10 @@ Lookback: ${lookbackHours} hours of data
             </div>
           )}
         </div>
-        <div style={{ padding: "16px 28px", borderTop: \`1px solid \${C.border}\`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: \`1px solid \${C.border}\`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
+        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
           <button onClick={handleGenerate} disabled={generating || !emails.trim()}
-            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: emails.trim() ? \`linear-gradient(135deg, \${C.accent}, \${C.yellow})\` : C.border, fontSize: 13, fontWeight: 600, color: emails.trim() ? "#fff" : C.textLight, cursor: emails.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6 }}>
+            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: emails.trim() ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, fontSize: 13, fontWeight: 600, color: emails.trim() ? "#fff" : C.textLight, cursor: emails.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6 }}>
             {generating ? "⏳ Generating..." : "⬇️ Download Auto Report Package"}
           </button>
         </div>
