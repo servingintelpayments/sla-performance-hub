@@ -1444,8 +1444,15 @@ function SendReportModal({ show, onClose, onSend, dateLabel }) {
 const AUTOREPORT_PY_CONTENT = "\"\"\"Auto KPI Report - Queries D365 + Sends styled email via Graph API\"\"\"\nimport os, sys, json\nfrom datetime import datetime, timedelta, timezone\nfrom zoneinfo import ZoneInfo\nimport requests\nfrom msal import ConfidentialClientApplication\n\nD365_TENANT = os.environ[\"D365_TENANT_ID\"]\nD365_CLIENT = os.environ[\"D365_CLIENT_ID\"]\nD365_SECRET = os.environ[\"D365_CLIENT_SECRET\"]\nORG_URL = os.environ[\"D365_ORG_URL\"].rstrip(\"/\")\nGRAPH_TENANT = os.environ.get(\"GRAPH_TENANT_ID\", D365_TENANT)\nGRAPH_CLIENT = os.environ.get(\"GRAPH_CLIENT_ID\", D365_CLIENT)\nGRAPH_SECRET = os.environ.get(\"GRAPH_CLIENT_SECRET\", D365_SECRET)\nSEND_FROM = os.environ[\"SEND_FROM\"]\nSEND_TO = os.environ[\"SEND_TO\"]\nLOOKBACK = int(os.environ.get(\"LOOKBACK_HOURS\", \"24\"))\nTIERS = os.environ.get(\"REPORT_TIERS\", \"ALL\")\nMEMBERS = [m.strip() for m in os.environ.get(\"REPORT_MEMBERS\", \"\").split(\",\") if m.strip()]\nTIME_FROM = os.environ.get(\"TIME_FROM\", \"00:00\")\nTIME_TO = os.environ.get(\"TIME_TO\", \"23:59\")\nAPI_BASE = f\"{ORG_URL}/api/data/v9.2\"\nCT = ZoneInfo(\"America/Chicago\")\n\ndef get_d365_token():\n    app = ConfidentialClientApplication(D365_CLIENT, authority=f\"https://login.microsoftonline.com/{D365_TENANT}\", client_credential=D365_SECRET)\n    r = app.acquire_token_for_client(scopes=[f\"{ORG_URL}/.default\"])\n    if \"access_token\" not in r: print(f\"D365 auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\ndef get_graph_token():\n    app = ConfidentialClientApplication(GRAPH_CLIENT, authority=f\"https://login.microsoftonline.com/{GRAPH_TENANT}\", client_credential=GRAPH_SECRET)\n    r = app.acquire_token_for_client(scopes=[\"https://graph.microsoft.com/.default\"])\n    if \"access_token\" not in r: print(f\"Graph auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\nS = requests.Session()\n\ndef init_d365(token):\n    S.headers.update({\"Authorization\": f\"Bearer {token}\", \"OData-MaxVersion\": \"4.0\", \"OData-Version\": \"4.0\", \"Accept\": \"application/json\", \"Prefer\": \"odata.include-annotations=*,odata.maxpagesize=5000\"})\n\ndef d365_get(q):\n    url = f\"{API_BASE}/{q}\"\n    rows = []\n    while url:\n        r = S.get(url); r.raise_for_status(); d = r.json()\n        rows.extend(d.get(\"value\", [])); url = d.get(\"@odata.nextLink\")\n    return rows\n\ndef d365_count(q):\n    r = S.get(f\"{API_BASE}/{q}\"); r.raise_for_status(); d = r.json()\n    return d.get(\"@odata.count\", len(d.get(\"value\", [])))\n\ndef get_range():\n    now = datetime.now(CT)\n    start = now - timedelta(hours=LOOKBACK)\n    fh, fm2 = map(int, TIME_FROM.split(\":\"))\n    th, tm2 = map(int, TIME_TO.split(\":\"))\n    start = start.replace(hour=fh, minute=fm2, second=0, microsecond=0)\n    end = now.replace(hour=th, minute=tm2, second=59, microsecond=0)\n    s = start.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    e = end.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    label = f\"{start.strftime('%b %d, %I:%M %p')} - {end.strftime('%b %d, %I:%M %p %Z')}\"\n    return s, e, label\n\ndef count_kpi(rows, field):\n    met = missed = 0\n    for r in rows:\n        st = (r.get(field) or {}).get(\"status\")\n        if st == 4: met += 1\n        elif st == 1: missed += 1\n    return met, missed\n\ndef pct(n, d): return round(n/d*100) if d > 0 else \"N/A\"\ndef sla_pct(m, x): t = m+x; return round(m/t*100) if t > 0 else \"N/A\"\ndef ic(v, tgt, inv=False):\n    if v == \"N/A\": return \"\u2796\"\n    return \"\u2705\" if (inv and v < tgt) or (not inv and v >= tgt) else \"\ud83d\udd34\"\ndef fm(v): return f\"{v}%\" if v != \"N/A\" else \"N/A\"\n\ndef fetch_tier(code, df, s, e):\n    base = f\"casetypecode eq {code} and {df} ge {s} and {df} le {e}\"\n    total = d365_count(f\"incidents?$filter={base}&$count=true&$top=1\")\n    resolved = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    resp = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=firstresponsebykpiid($select=status)\")\n    active = d365_get(f\"incidents?$filter={base} and statecode eq 0&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    sm, sx = count_kpi(resolved, \"resolvebykpiid\")\n    rm, rx = count_kpi(resp, \"firstresponsebykpiid\")\n    breached = sum(1 for r in active if (r.get(\"resolvebykpiid\") or {}).get(\"status\") == 1)\n    return {\"total\": total, \"resolved\": len(resolved), \"sla_met\": sm, \"sla_missed\": sx, \"sla\": sla_pct(sm, sx),\n            \"resp_met\": rm, \"resp_missed\": rx, \"resp_sla\": sla_pct(rm, rx),\n            \"breach\": breached, \"breach_total\": len(active), \"breach_rate\": pct(breached, len(active)) if len(active) > 0 else 0}\n\ndef row(label, val, indent=False):\n    pad = \"padding-left:14px;font-size:12px;\" if indent else \"\"\n    return f'<tr><td style=\"padding:6px 0;color:#555;{pad}\">{label}</td><td style=\"padding:6px 0;text-align:right;font-weight:700;\">{val}</td></tr>'\n\ndef build_html(tiers_data, ph, em, cs, label, config_label):\n    colors = {1: (\"#1565c0\",\"#2196F3\"), 2: (\"#e65100\",\"#FF9800\"), 3: (\"#7b1fa2\",\"#9C27B0\")}\n    tier_html = \"\"\n    for td in tiers_data:\n        c1, c2 = colors.get(td[\"code\"], (\"#333\",\"#666\"))\n        t = td[\"data\"]\n        tier_html += f'''<div style=\"background:linear-gradient(135deg,{c1},{c2});color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;\"><strong>{td[\"name\"]}</strong></div>\n<div style=\"background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;\"><table style=\"width:100%;border-collapse:collapse;font-size:13px;\">\n{row(\"SLA Compliance\", f\"{fm(t['sla'])} {ic(t['sla'],90)}\")}\n{row(f\"  {t['sla_met']} met / {t['sla_missed']} missed\", \"\", True)}\n{row(\"Response SLA\", f\"{fm(t['resp_sla'])} {ic(t['resp_sla'],90)}\")}\n{row(\"Open Breach\", f\"{t['breach_rate']}% {ic(t['breach_rate'],5,True)} ({t['breach']}/{t['breach_total']})\")}\n{row(\"FCR\", f\"{fm(t.get('fcr_rate','N/A'))} {ic(t.get('fcr_rate','N/A'),90)}\")}\n{row(\"Escalation\", f\"{fm(t.get('esc_rate','N/A'))} {ic(t.get('esc_rate','N/A'),10,True)}\")}\n{row(\"Total\", t[\"total\"])}{row(\"Resolved\", t[\"resolved\"])}\n</table></div>'''\n    tc = sum(t[\"data\"][\"total\"] for t in tiers_data)\n    tr = sum(t[\"data\"][\"resolved\"] for t in tiers_data)\n    return f'''<div style=\"font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;\">\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;\">\n<h1 style=\"margin:0;font-size:20px;\">Auto Report</h1>\n<p style=\"margin:4px 0 0;font-size:13px;opacity:0.85;\">{label}</p>\n<p style=\"margin:2px 0 0;font-size:10px;opacity:0.6;\">{config_label}</p></div>\n{tier_html}\n<table style=\"width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;\"><tr>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2D9D78;\">Phone</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",ph[\"total\"])}{row(\"Answered\",ph[\"answered\"])}{row(\"Abandoned\",ph[\"abandoned\"])}{row(\"Rate\",f\"{fm(ph['rate'])} {ic(ph['rate'],95)}\")}</table></td>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2196F3;\">Email</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",em[\"total\"])}{row(\"Responded\",em[\"responded\"])}{row(\"Resolved\",em[\"resolved\"])}</table></td>\n</tr></table>\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;\">\n<strong>OVERALL</strong><table style=\"width:100%;margin-top:12px;\"><tr>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#4FC3F7;\">{tc}</div><div style=\"font-size:10px;color:#a8c6df;\">Created</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{tr}</div><div style=\"font-size:10px;color:#a8c6df;\">Resolved</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{ph[\"answered\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Answered</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#f44336;\">{ph[\"abandoned\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Abandoned</div></td>\n</tr></table></div>\n<p style=\"text-align:center;font-size:10px;color:#999;margin-top:16px;\">Auto-generated from Dynamics 365</p></div>'''\n\ndef send_email(html, label):\n    token = get_graph_token()\n    recipients = [{\"emailAddress\": {\"address\": e.strip()}} for e in SEND_TO.split(\",\") if e.strip()]\n    payload = {\"message\": {\"subject\": f\"Auto Report - {label}\", \"body\": {\"contentType\": \"HTML\", \"content\": html}, \"toRecipients\": recipients, \"from\": {\"emailAddress\": {\"address\": SEND_FROM}}}}\n    r = requests.post(f\"https://graph.microsoft.com/v1.0/users/{SEND_FROM}/sendMail\", headers={\"Authorization\": f\"Bearer {token}\", \"Content-Type\": \"application/json\"}, json=payload)\n    if r.status_code not in (200, 202): print(f\"Email failed ({r.status_code}): {r.text[:300]}\"); sys.exit(1)\n    print(f\"Email sent to {SEND_TO}\")\n\ndef main():\n    print(\"Authenticating D365...\")\n    init_d365(get_d365_token())\n    s, e, label = get_range()\n    print(f\"Report: {label}\")\n    tier_configs = [\n        {\"code\": 1, \"df\": \"createdon\", \"name\": \"Tier 1 - Service Desk\"},\n        {\"code\": 2, \"df\": \"escalatedon\", \"name\": \"Tier 2 - Programming\"},\n        {\"code\": 3, \"df\": \"escalatedon\", \"name\": \"Tier 3 - Relationship Mgrs\"},\n    ]\n    if TIERS != \"ALL\":\n        tier_codes = [int(t.strip()) for t in TIERS.split(\",\")]\n        tier_configs = [tc for tc in tier_configs if tc[\"code\"] in tier_codes]\n    tiers_data = []\n    for tc in tier_configs:\n        print(f\"Querying {tc['name']}...\")\n        t = fetch_tier(tc[\"code\"], tc[\"df\"], s, e)\n        if tc[\"code\"] == 1:\n            fcr = d365_count(f\"incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge {s} and createdon le {e}&$count=true&$top=1\")\n            esc = d365_count(f\"incidents?$filter=casetypecode eq 2 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"fcr_rate\"] = pct(fcr, t[\"total\"]); t[\"esc_rate\"] = pct(esc, t[\"total\"])\n        elif tc[\"code\"] == 2:\n            t2e = d365_count(f\"incidents?$filter=casetypecode eq 3 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"esc_rate\"] = pct(t2e, t[\"total\"])\n        tiers_data.append({**tc, \"data\": t})\n    print(\"Phone...\")\n    try:\n        pb = f\"createdon ge {s} and createdon le {e} and directioncode eq true\"\n        pt = d365_count(f\"phonecalls?$filter={pb}&$count=true&$top=1\")\n        pa = d365_count(f\"phonecalls?$filter={pb} and statecode eq 1&$count=true&$top=1\")\n        ph = {\"total\": pt, \"answered\": pa, \"abandoned\": pt-pa, \"rate\": pct(pa, pt)}\n    except: ph = {\"total\":0,\"answered\":0,\"abandoned\":0,\"rate\":\"N/A\"}\n    print(\"Email...\")\n    eb = f\"caseorigincode eq 2 and createdon ge {s} and createdon le {e}\"\n    em = {\"total\": d365_count(f\"incidents?$filter={eb}&$count=true&$top=1\"),\n          \"responded\": d365_count(f\"incidents?$filter={eb} and firstresponsesent eq true&$count=true&$top=1\"),\n          \"resolved\": d365_count(f\"incidents?$filter={eb} and statecode eq 1&$count=true&$top=1\")}\n    print(\"CSAT...\")\n    try:\n        cr = d365_get(f\"cr7fe_new_csats?$filter=createdon ge {s} and createdon le {e}&$select=cr7fe_new_rating\")\n        sc = [r[\"cr7fe_new_rating\"] for r in cr if r.get(\"cr7fe_new_rating\") is not None]\n        cs = {\"count\": len(sc), \"avg\": round(sum(sc)/len(sc),1) if sc else \"N/A\"}\n    except: cs = {\"count\":0,\"avg\":\"N/A\"}\n    tier_label = \"All Tiers\" if TIERS == \"ALL\" else \", \".join(tc[\"name\"] for tc in tiers_data)\n    member_label = f\"{len(MEMBERS)} members\" if MEMBERS else \"\"\n    config_label = tier_label + (\" | \" + member_label if member_label else \"\")\n    html = build_html(tiers_data, ph, em, cs, label, config_label)\n    print(\"Sending email...\"); send_email(html, label)\n    print(\"Done!\")\n\nif __name__ == \"__main__\": main()\n";
 
 function AutoReportModal({ show, onClose, queues, d365Account }) {
+  const [view, setView] = useState("list"); // "list" or "edit"
+  const [editId, setEditId] = useState(null);
+  const [savedReports, setSavedReports] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("autoReports") || "[]"); } catch { return []; }
+  });
   const [emails, setEmails] = useState("");
-  const [intervalHours, setIntervalHours] = useState(24);
+  const [intervalValue, setIntervalValue] = useState(1);
+  const [intervalUnit, setIntervalUnit] = useState("Day");
+  const [reportName, setReportName] = useState("");
   const [selectedTier, setSelectedTier] = useState("");
   const [autoMembers, setAutoMembers] = useState([]);
   const [autoMembersList, setAutoMembersList] = useState([]);
@@ -1456,6 +1463,7 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
   const [toTime, setToTime] = useState("23:59");
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   useEffect(() => {
     if (selectedTier && selectedTier !== "all" && d365Account) {
@@ -1464,18 +1472,25 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
     } else { setAutoMembersList([]); setAutoMembers([]); }
   }, [selectedTier, d365Account]);
 
+  const persist = (reports) => { setSavedReports(reports); localStorage.setItem("autoReports", JSON.stringify(reports)); };
+
   if (!show) return null;
 
-  const cronExpr = intervalHours <= 1 ? "0 * * * *"
-    : intervalHours <= 12 ? `0 */${intervalHours} * * *`
-    : intervalHours === 24 ? "1 6 * * *"
-    : intervalHours === 168 ? "1 6 * * 1"
-    : `0 */${intervalHours} * * *`;
+  const intervalHours = intervalUnit === "Minute" ? Math.max(1, intervalValue) / 60
+    : intervalUnit === "Hour" ? intervalValue
+    : intervalUnit === "Day" ? intervalValue * 24
+    : intervalUnit === "Month" ? intervalValue * 720
+    : intervalValue * 8760;
 
-  const cronLabel = intervalHours === 1 ? "Every hour"
-    : intervalHours === 24 ? "Daily at 12:01 AM CT"
-    : intervalHours === 168 ? "Weekly (Monday 12:01 AM CT)"
-    : `Every ${intervalHours} hours`;
+  const cronExpr = intervalUnit === "Minute" ? (intervalValue <= 1 ? "* * * * *" : `*/${intervalValue} * * * *`)
+    : intervalUnit === "Hour" ? (intervalValue <= 1 ? "0 * * * *" : `0 */${intervalValue} * * *`)
+    : intervalUnit === "Day" ? (intervalValue <= 1 ? "1 6 * * *" : `1 6 */${intervalValue} * *`)
+    : intervalUnit === "Month" ? `1 6 1 */${intervalValue} *`
+    : `1 6 1 1 *`;
+
+  const cronLabel = intervalValue === 1
+    ? `Every ${intervalUnit.toLowerCase()}`
+    : `Every ${intervalValue} ${intervalUnit.toLowerCase()}s`;
 
   const tierObj = queues.find(q => q.id === selectedTier);
   const tierLabel = selectedTier === "all" ? "All Tiers" : (tierObj?.tierLabel || "Not selected");
@@ -1491,31 +1506,55 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
 
   const daysDiff = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000));
 
-  const handleGenerate = () => {
-    if (!emails.trim() || !selectedTier) return;
-    setGenerating(true);
-    const tierConfig = selectedTier === "all" ? "ALL" : String(tierNum || 1);
-    const memberIds = autoMembers.length > 0 ? autoMembers.join(",") : "";
-    const lookbackHours = daysDiff * 24;
+  const resetForm = () => {
+    setReportName(""); setEmails(""); setIntervalValue(1); setIntervalUnit("Day");
+    setSelectedTier(""); setAutoMembers([]); setAutoMembersList([]);
+    const d = new Date(); const y = new Date(); y.setDate(y.getDate() - 1);
+    setStartDate(y.toISOString().split("T")[0]); setEndDate(d.toISOString().split("T")[0]);
+    setFromTime("00:00"); setToTime("23:59"); setGenerated(false); setEditId(null);
+  };
 
+  const loadReport = (r) => {
+    setEditId(r.id); setReportName(r.name || ""); setEmails(r.emails || "");
+    setIntervalValue(r.intervalValue || 1); setIntervalUnit(r.intervalUnit || "Day");
+    setSelectedTier(r.selectedTier || ""); setAutoMembers(r.autoMembers || []);
+    setStartDate(r.startDate || ""); setEndDate(r.endDate || "");
+    setFromTime(r.fromTime || "00:00"); setToTime(r.toTime || "23:59");
+    setGenerated(false); setView("edit");
+  };
+
+  const handleSave = () => {
+    if (!reportName.trim() || !emails.trim() || !selectedTier) return;
+    const config = {
+      id: editId || Date.now().toString(),
+      name: reportName.trim(), emails: emails.trim(),
+      intervalValue, intervalUnit, cronExpr, cronLabel,
+      selectedTier, tierLabel, tierNum,
+      autoMembers: [...autoMembers], memberNames: [...memberNames],
+      startDate, endDate, fromTime, toTime, daysDiff,
+      savedAt: new Date().toISOString(),
+    };
+    const updated = editId ? savedReports.map(r => r.id === editId ? config : r) : [...savedReports, config];
+    persist(updated);
+    setView("list"); resetForm();
+  };
+
+  const handleDelete = (id) => {
+    persist(savedReports.filter(r => r.id !== id));
+    setConfirmDelete(null);
+  };
+
+  const handleDownload = (report) => {
+    const tc = report.selectedTier === "all" ? "ALL" : String(report.tierNum || 1);
+    const lh = report.daysDiff * 24;
+    const mids = (report.autoMembers || []).join(",");
     const yamlLines = [
-      "name: Auto KPI Report",
-      "on:",
-      "  schedule:",
-      "    - cron: '" + cronExpr + "'",
-      "  workflow_dispatch:",
-      "",
-      "jobs:",
-      "  send-report:",
-      "    runs-on: ubuntu-latest",
-      "    steps:",
-      "      - uses: actions/checkout@v4",
-      "      - uses: actions/setup-python@v5",
-      "        with:",
-      "          python-version: '3.11'",
-      "      - run: pip install requests msal",
-      "      - name: Generate and send report",
-      "        env:",
+      "name: Auto KPI Report - " + report.name, "on:", "  schedule:",
+      "    - cron: '" + report.cronExpr + "'", "  workflow_dispatch:", "",
+      "jobs:", "  send-report:", "    runs-on: ubuntu-latest", "    steps:",
+      "      - uses: actions/checkout@v4", "      - uses: actions/setup-python@v5",
+      "        with:", "          python-version: '3.11'", "      - run: pip install requests msal",
+      "      - name: Generate and send report", "        env:",
       "          D365_TENANT_ID: ${{secrets.D365_TENANT_ID}}",
       "          D365_CLIENT_ID: ${{secrets.D365_CLIENT_ID}}",
       "          D365_CLIENT_SECRET: ${{secrets.D365_CLIENT_SECRET}}",
@@ -1524,77 +1563,138 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
       "          GRAPH_CLIENT_ID: ${{secrets.GRAPH_CLIENT_ID}}",
       "          GRAPH_CLIENT_SECRET: ${{secrets.GRAPH_CLIENT_SECRET}}",
       "          SEND_FROM: ${{secrets.SEND_FROM}}",
-      '          SEND_TO: "' + emails.trim() + '"',
-      '          LOOKBACK_HOURS: "' + lookbackHours + '"',
-      '          REPORT_TIERS: "' + tierConfig + '"',
-      '          REPORT_MEMBERS: "' + memberIds + '"',
-      '          TIME_FROM: "' + fromTime + '"',
-      '          TIME_TO: "' + toTime + '"',
+      '          SEND_TO: "' + report.emails + '"',
+      '          LOOKBACK_HOURS: "' + lh + '"',
+      '          REPORT_TIERS: "' + tc + '"',
+      '          REPORT_MEMBERS: "' + mids + '"',
+      '          TIME_FROM: "' + report.fromTime + '"',
+      '          TIME_TO: "' + report.toTime + '"',
       "        run: python auto_report.py",
     ];
-    const workflowYaml = yamlLines.join("\n");
-
-    const pythonScript = AUTOREPORT_PY_CONTENT;
-
-    const readmeLines = [
-      "# Auto KPI Report", "",
-      "Automated service desk report via GitHub Actions.", "",
+    const readme = [
+      "# Auto KPI Report: " + report.name, "",
       "## Configuration",
-      "- Tier: " + tierLabel,
-      "- Members: " + (memberNames.length > 0 ? memberNames.join(", ") : "All"),
-      "- Schedule: " + cronLabel,
-      "- Lookback: " + daysDiff + " day(s)",
-      "- Time window: " + fromTime + " - " + toTime,
-      "- Recipients: " + emails.trim(), "",
+      "- Tier: " + report.tierLabel,
+      "- Members: " + (report.memberNames.length > 0 ? report.memberNames.join(", ") : "All"),
+      "- Schedule: " + report.cronLabel,
+      "- Lookback: " + report.daysDiff + " day(s)",
+      "- Time: " + report.fromTime + " - " + report.toTime,
+      "- Recipients: " + report.emails, "",
       "## Setup", "",
       "### 1. Azure App Registration",
       "Add **Microsoft Graph > Application > Mail.Send** + Grant admin consent", "",
       "### 2. GitHub Secrets",
-      "| Secret | Value |",
-      "|--------|-------|",
+      "| Secret | Value |", "|--------|-------|",
       "| D365_TENANT_ID | 1b0086bd-aeda-4c74-a15a-23adfe4d0693 |",
       "| D365_CLIENT_ID | 0918449d-b73e-428a-8238-61723f2a2e7d |",
       "| D365_CLIENT_SECRET | Your app client secret |",
       "| D365_ORG_URL | https://servingintel.crm.dynamics.com |",
-      "| GRAPH_TENANT_ID | (same as D365_TENANT_ID) |",
-      "| GRAPH_CLIENT_ID | (same as D365_CLIENT_ID) |",
-      "| GRAPH_CLIENT_SECRET | (same as D365_CLIENT_SECRET) |",
-      "| SEND_FROM | your-email@servingintel.com |", "",
+      "| GRAPH_TENANT_ID | (same) |", "| GRAPH_CLIENT_ID | (same) |",
+      "| GRAPH_CLIENT_SECRET | (same) |", "| SEND_FROM | your-email@servingintel.com |", "",
       "### 3. Push and Run",
       'git add . && git commit -m "auto report" && git push',
-      "Go to Actions > Run workflow to test",
     ];
-    const readmeText = readmeLines.join("\n");
-
     [
-      { name: "auto-report.yml", content: workflowYaml },
-      { name: "auto_report.py", content: pythonScript },
-      { name: "README.md", content: readmeText },
+      { name: "auto-report-" + report.name.toLowerCase().replace(/\s+/g, "-") + ".yml", content: yamlLines.join("\n") },
+      { name: "auto_report.py", content: AUTOREPORT_PY_CONTENT },
+      { name: "README.md", content: readme.join("\n") },
     ].forEach((f, i) => {
       setTimeout(() => {
         const blob = new Blob([f.content], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = f.name; a.click();
+        const a = document.createElement("a"); a.href = url; a.download = f.name; a.click();
         URL.revokeObjectURL(url);
       }, i * 500);
     });
-    setGenerating(false);
-    setGenerated(true);
   };
 
   const inputSt = { width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" };
   const labelSt = { fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 };
   const subSt = { fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 };
 
+  // ─── LIST VIEW ──────────────────────────────────────
+  if (view === "list") return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 20, width: 560, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+        <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⏰ Auto Reports</h2>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>{savedReports.length} saved report{savedReports.length !== 1 ? "s" : ""}</p>
+          </div>
+          <button onClick={() => { resetForm(); setView("edit"); }} style={{ padding: "8px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 16 }}>+</span> New Report
+          </button>
+        </div>
+        <div style={{ padding: "16px 28px" }}>
+          {savedReports.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 0" }}>
+              <div style={{ fontSize: 44, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 4 }}>No auto reports yet</div>
+              <div style={{ fontSize: 12, color: C.textMid, maxWidth: 300, margin: "0 auto", lineHeight: 1.5 }}>Create an auto report to schedule recurring email reports with your D365 data.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {savedReports.map(r => (
+                <div key={r.id} style={{ border: `1.5px solid ${C.border}`, borderRadius: 14, padding: "16px 18px", background: C.bg, position: "relative" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 2 }}>{r.name || "Untitled Report"}</div>
+                      <div style={{ fontSize: 11, color: C.textLight }}>Saved {new Date(r.savedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => loadReport(r)} title="Edit" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✏️</button>
+                      <button onClick={() => handleDownload(r)} title="Download" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>⬇️</button>
+                      <button onClick={() => setConfirmDelete(r.id)} title="Delete" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid #f4433620`, background: "#f4433608", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🗑️</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#1565c015", color: "#1565c0", fontWeight: 600 }}>🏢 {r.tierLabel}</span>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}12`, color: C.accent, fontWeight: 600 }}>🔄 {r.cronLabel}</span>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#2D9D7812", color: "#2D9D78", fontWeight: 600 }}>📧 {r.emails.split(",").length} recipient{r.emails.split(",").length !== 1 ? "s" : ""}</span>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.daysDiff}d ({r.fromTime}–{r.toTime})</span>
+                    {r.memberNames && r.memberNames.length > 0 && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#7b1fa212", color: "#7b1fa2", fontWeight: 600 }}>👥 {r.memberNames.length} member{r.memberNames.length !== 1 ? "s" : ""}</span>}
+                  </div>
+                  {confirmDelete === r.id && (
+                    <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "#f4433610", border: "1px solid #f4433630", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 12, color: "#d32f2f", fontWeight: 600 }}>Delete this report?</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setConfirmDelete(null)} style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${C.border}`, background: C.card, fontSize: 11, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
+                        <button onClick={() => handleDelete(r.id)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "#d32f2f", fontSize: 11, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Delete</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ─── EDIT VIEW ──────────────────────────────────────
+  const canSave = reportName.trim() && emails.trim() && selectedTier;
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: C.card, borderRadius: 20, width: 560, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
-        <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}` }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⏰ Auto Report Setup</h2>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Configure automated reports via GitHub Actions</p>
+        <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => { setView("list"); resetForm(); }} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>←</button>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>{editId ? "✏️ Edit Report" : "➕ New Auto Report"}</h2>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Configure scheduled report via GitHub Actions</p>
+          </div>
         </div>
         <div style={{ padding: "20px 28px" }}>
+
+          {/* REPORT NAME */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelSt}><span>📝</span> Report Name *</div>
+            <input type="text" value={reportName} onChange={e => setReportName(e.target.value)} placeholder="e.g. Daily Tier 1 Summary" style={inputSt} />
+          </div>
 
           {/* TIER */}
           <div style={{ marginBottom: 16 }}>
@@ -1639,16 +1739,14 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
           {/* SEND EVERY */}
           <div style={{ marginBottom: 16 }}>
             <div style={labelSt}><span>🔄</span> Send Every</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <input type="number" min="1" max="168" value={intervalHours} onChange={e => setIntervalHours(Math.max(1, parseInt(e.target.value) || 1))}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <select value={intervalUnit} onChange={e => { setIntervalUnit(e.target.value); setIntervalValue(1); }} style={{ ...inputSt, width: 120, cursor: "pointer", appearance: "auto" }}>
+                {["Minute", "Hour", "Day", "Month", "Year"].map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+              <input type="number" min="1" max="999" value={intervalValue} onChange={e => setIntervalValue(Math.max(1, parseInt(e.target.value) || 1))}
                 style={{ width: 70, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", textAlign: "center" }} />
-              <span style={{ fontSize: 13, color: C.textMid, fontWeight: 600 }}>hours</span>
             </div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {[{ l: "1h", v: 1 }, { l: "4h", v: 4 }, { l: "8h", v: 8 }, { l: "12h", v: 12 }, { l: "24h", v: 24 }].map(p =>
-                <button key={p.l} onClick={() => setIntervalHours(p.v)} style={{ padding: "3px 8px", borderRadius: 6, border: `1px solid ${intervalHours === p.v ? C.accent : C.border}`, background: intervalHours === p.v ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: intervalHours === p.v ? C.accent : C.textLight, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{p.l}</button>
-              )}
-            </div>
+            <div style={{ fontSize: 10, color: C.textLight, marginTop: 6 }}>Cron: <code style={{ fontFamily: "'Space Mono', monospace", background: C.bg, padding: "2px 6px", borderRadius: 4 }}>{cronExpr}</code></div>
           </div>
 
           {/* RECIPIENTS */}
@@ -1667,30 +1765,21 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
               <div>📅 <strong>Date range:</strong> {startDate} to {endDate} ({fromTime} — {toTime})</div>
               <div>🔄 <strong>Frequency:</strong> {cronLabel}</div>
               <div>📧 <strong>Recipients:</strong> {emails || "(enter emails above)"}</div>
-              <div>📊 <strong>Includes:</strong> SLA, Response SLA, Open Breach, FCR, Phone, Email, CSAT</div>
             </div>
           </div>
-
-          {generated && (
-            <div style={{ padding: "12px 14px", borderRadius: 10, background: C.greenLight, fontSize: 12, color: C.green, marginBottom: 12, lineHeight: 1.6 }}>
-              ✅ <strong>3 files downloaded!</strong><br/>
-              1. <code>auto-report.yml</code> → put in <code>.github/workflows/</code><br/>
-              2. <code>auto_report.py</code> → put in repo root<br/>
-              3. <code>README.md</code> → setup instructions
-            </div>
-          )}
         </div>
         <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
-          <button onClick={handleGenerate} disabled={generating || !emails.trim() || !selectedTier}
-            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: (emails.trim() && selectedTier) ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, fontSize: 13, fontWeight: 600, color: (emails.trim() && selectedTier) ? "#fff" : C.textLight, cursor: (emails.trim() && selectedTier) ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6 }}>
-            {generating ? "⏳ Generating..." : "⬇️ Download Auto Report Package"}
+          <button onClick={() => { setView("list"); resetForm(); }} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleSave} disabled={!canSave}
+            style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: canSave ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, fontSize: 13, fontWeight: 600, color: canSave ? "#fff" : C.textLight, cursor: canSave ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 6 }}>
+            💾 {editId ? "Update Report" : "Save Report"}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
 
 
 /* ═══════════════════════════════════════════════════════
@@ -2025,7 +2114,7 @@ function Dashboard({ user, onLogout }) {
           {!canRun && <div style={{ fontSize: 10, color: C.accent, textAlign: "center", marginTop: 6 }}>{d365Account ? "Select a tier to run report" : "Select at least 1 team member"}</div>}
           {hasRun && <button onClick={handleExportPDF} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${C.border}`, background: C.card, color: C.textDark, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📄</span> Export to PDF</button>}
           {hasRun && <button onClick={() => setShowSendModal(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${d365Account ? "#0078D4" : C.border}`, background: d365Account ? "#0078D410" : C.card, color: d365Account ? "#0078D4" : C.textLight, fontSize: 13, fontWeight: 600, cursor: d365Account ? "pointer" : "not-allowed", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📤</span> Send Report{!d365Account && <span style={{ fontSize: 9, opacity: 0.7 }}>(sign in first)</span>}</button>}
-          <button onClick={() => setShowAutoReport(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid #FF980060`, background: "#FF980008", color: "#e65100", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>⏰</span> Auto Reports</button>
+          <button onClick={() => setShowAutoReport(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid #FF980060`, background: "#FF980008", color: "#e65100", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, position: "relative" }}><span>⏰</span> Auto Reports{(() => { try { const c = JSON.parse(localStorage.getItem("autoReports") || "[]").length; return c > 0 ? <span style={{ background: C.accent, color: "#fff", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 10, marginLeft: 4 }}>{c}</span> : null; } catch { return null; } })()}</button>
         </div>
         <div className="dash-main" style={{ flex: 1, padding: "24px 28px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
           {!hasRun ? (
