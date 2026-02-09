@@ -886,6 +886,109 @@ async function fetchLiveData(config, startDate, endDate, onProgress, startTime, 
   };
 }
 
+/* ─── AUTO REPORT: STANDALONE EMAIL BUILDER + SENDER ─── */
+function buildAutoEmailHTML(data, dateLabel) {
+  if (!data) return "";
+  const t1 = data.tier1 || {}, t2 = data.tier2 || {}, t3 = data.tier3 || {};
+  const ph = data.phone || {}, em = data.email || {}, cs = data.csat || {}, ov = data.overall || {};
+  const ic = (val, target, inv) => val === "N/A" || val === undefined ? "➖" : (inv ? (val < target ? "✅" : "🔴") : (val >= target ? "✅" : "🔴"));
+  const fm = (v) => v === "N/A" || v === undefined ? "N/A" : `${v}%`;
+  const row = (label, val, indent) => `<tr><td style="padding:6px 0;color:#555;${indent ? 'padding-left:14px;font-size:12px;' : ''}">${label}</td><td style="padding:6px 0;text-align:right;font-weight:700;">${val}</td></tr>`;
+  return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;">
+  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;">
+    <h1 style="margin:0;font-size:20px;">📊 Auto Report</h1>
+    <p style="margin:4px 0 0;font-size:13px;opacity:0.85;">${dateLabel}</p>
+  </div>
+  <div style="background:linear-gradient(135deg,#1565c0,#2196F3);color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;"><strong style="font-size:15px;">🔵 Tier 1 — Service Desk</strong></div>
+  <div style="background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      ${row("SLA Compliance", `${fm(t1.slaCompliance)} ${ic(t1.slaCompliance, 90, false)}`)}
+      ${row(`↳ ${t1.slaMet||0} met · ${t1.slaMissed||0} missed`, "", true)}
+      ${row("Response SLA", `${fm(t1.slaResponseCompliance)} ${ic(t1.slaResponseCompliance, 90, false)}`)}
+      ${row("Open SLA Breach", `${t1.openBreachRate||0}% ${ic(t1.openBreachRate||0, 5, true)}<br/><span style="font-size:11px;font-weight:normal;color:#888;">${t1.openBreachCount||0} of ${t1.openBreachTotal||0} active</span>`)}
+      ${row("FCR Rate", `${fm(t1.fcrRate)} ${ic(t1.fcrRate, 90, false)}`)}
+      ${row("Escalation Rate", `${fm(t1.escalationRate)} ${ic(t1.escalationRate, 10, true)}`)}
+      ${row("Avg Resolution Time", `${t1.avgResolutionTime || "N/A"} ⏱️`)}
+      ${row("Total Cases", t1.total || 0)}
+      ${row("CSAT Score", `${cs.avgScore || "N/A"}/5 ${cs.avgScore != null && cs.avgScore !== "N/A" && cs.avgScore >= 4 ? "✅" : (cs.avgScore === "N/A" ? "➖" : "🔴")}`)}
+    </table>
+  </div>
+  <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
+    <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;">
+      <strong style="font-size:12px;color:#2D9D78;">📞 Phone</strong>
+      <table style="width:100%;font-size:12px;margin-top:8px;">
+        ${row("Total", ph.totalCalls||0)}
+        ${row("Answered", `<span style="color:#2D9D78">${ph.answered||0}</span>`)}
+        ${row("Abandoned", `<span style="color:#E5544B">${ph.abandoned||0}</span>`)}
+        ${row("Answer Rate", `${fm(ph.answerRate)} ${ic(ph.answerRate, 95, false)}`)}
+      </table>
+    </td>
+    <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;">
+      <strong style="font-size:12px;color:#2196F3;">📧 Email</strong>
+      <table style="width:100%;font-size:12px;margin-top:8px;">
+        ${row("Total", em.total||0)}
+        ${row("Responded", `<span style="color:#FF9800">${em.responded||0}</span>`)}
+        ${row("Resolved", `<span style="color:#2D9D78">${em.resolved||0}</span>`)}
+      </table>
+    </td>
+  </tr></table>
+  <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
+    <td style="width:50%;vertical-align:top;">
+      <div style="background:linear-gradient(135deg,#e65100,#FF9800);color:#fff;padding:10px 16px;border-radius:10px 10px 0 0;"><strong style="font-size:13px;">🟠 Tier 2 — Programming</strong></div>
+      <div style="background:#fff;padding:12px 16px;border-radius:0 0 10px 10px;">
+        <table style="width:100%;font-size:12px;">
+          ${row("SLA", `${fm(t2.slaCompliance)} ${ic(t2.slaCompliance, 90, false)}`)}
+          ${row("Response SLA", `${fm(t2.slaResponseCompliance)} ${ic(t2.slaResponseCompliance, 90, false)}`)}
+          ${row("Breach", `${t2.openBreachRate||0}% ${ic(t2.openBreachRate||0, 5, true)}`)}
+          ${row("Cases", t2.total||0)} ${row("Resolved", t2.resolved||0)}
+        </table>
+      </div>
+    </td>
+    <td style="width:50%;vertical-align:top;">
+      <div style="background:linear-gradient(135deg,#7b1fa2,#9C27B0);color:#fff;padding:10px 16px;border-radius:10px 10px 0 0;"><strong style="font-size:13px;">🟣 Tier 3 — Relationship Mgrs</strong></div>
+      <div style="background:#fff;padding:12px 16px;border-radius:0 0 10px 10px;">
+        <table style="width:100%;font-size:12px;">
+          ${row("SLA", `${fm(t3.slaCompliance)} ${ic(t3.slaCompliance, 90, false)}`)}
+          ${row("Response SLA", `${fm(t3.slaResponseCompliance)} ${ic(t3.slaResponseCompliance, 90, false)}`)}
+          ${row("Breach", `${t3.openBreachRate||0}% ${ic(t3.openBreachRate||0, 5, true)}`)}
+          ${row("Cases", t3.total||0)} ${row("Resolved", t3.resolved||0)}
+        </table>
+      </div>
+    </td>
+  </tr></table>
+  <div style="background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;">
+    <strong style="font-size:13px;">📈 OVERALL SUMMARY</strong>
+    <table style="width:100%;margin-top:12px;"><tr>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#4FC3F7;">${ov.created||0}</div><div style="font-size:10px;color:#a8c6df;">Created</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#81C784;">${ov.resolved||0}</div><div style="font-size:10px;color:#a8c6df;">Resolved</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#81C784;">${ph.answered||0}</div><div style="font-size:10px;color:#a8c6df;">Answered</div></td>
+      <td style="text-align:center"><div style="font-size:24px;font-weight:700;color:#f44336;">${ph.abandoned||0}</div><div style="font-size:10px;color:#a8c6df;">Abandoned</div></td>
+    </tr></table>
+  </div>
+  <p style="text-align:center;font-size:10px;color:#999;margin-top:16px;">Auto-generated from Dynamics 365 · Service and Operations Dashboard</p>
+</div>`;
+}
+
+function getIntervalMs(unit, value) {
+  const v = Math.max(1, value);
+  if (unit === "Minute") return v * 60000;
+  if (unit === "Hour") return v * 3600000;
+  if (unit === "Day") return v * 86400000;
+  if (unit === "Month") return v * 2592000000;
+  return v * 31536000000;
+}
+
+async function executeAutoReport(report) {
+  console.log(`[AutoReport] Sending "${report.name}"...`);
+  const data = await fetchLiveData({}, report.startDate, report.endDate, () => {}, report.fromTime, report.toTime);
+  const dateLabel = `${report.startDate} to ${report.endDate} (${report.fromTime} — ${report.toTime})`;
+  const html = buildAutoEmailHTML(data, dateLabel);
+  if (!html) throw new Error("No report data generated");
+  await sendEmailViaGraph(report.emails, `📊 Auto Report: ${report.name} — ${dateLabel}`, html);
+  console.log(`[AutoReport] ✅ "${report.name}" sent to ${report.emails}`);
+  return true;
+}
+
 /* ─── AUTH STORE ─── */
 const Auth = {
   getUsers() { try { return JSON.parse(localStorage.getItem("sla_users") || "[]"); } catch { return []; } },
@@ -1443,7 +1546,7 @@ function SendReportModal({ show, onClose, onSend, dateLabel }) {
 
 const AUTOREPORT_PY_CONTENT = "\"\"\"Auto KPI Report - Queries D365 + Sends styled email via Graph API\"\"\"\nimport os, sys, json\nfrom datetime import datetime, timedelta, timezone\nfrom zoneinfo import ZoneInfo\nimport requests\nfrom msal import ConfidentialClientApplication\n\nD365_TENANT = os.environ[\"D365_TENANT_ID\"]\nD365_CLIENT = os.environ[\"D365_CLIENT_ID\"]\nD365_SECRET = os.environ[\"D365_CLIENT_SECRET\"]\nORG_URL = os.environ[\"D365_ORG_URL\"].rstrip(\"/\")\nGRAPH_TENANT = os.environ.get(\"GRAPH_TENANT_ID\", D365_TENANT)\nGRAPH_CLIENT = os.environ.get(\"GRAPH_CLIENT_ID\", D365_CLIENT)\nGRAPH_SECRET = os.environ.get(\"GRAPH_CLIENT_SECRET\", D365_SECRET)\nSEND_FROM = os.environ[\"SEND_FROM\"]\nSEND_TO = os.environ[\"SEND_TO\"]\nLOOKBACK = int(os.environ.get(\"LOOKBACK_HOURS\", \"24\"))\nTIERS = os.environ.get(\"REPORT_TIERS\", \"ALL\")\nMEMBERS = [m.strip() for m in os.environ.get(\"REPORT_MEMBERS\", \"\").split(\",\") if m.strip()]\nTIME_FROM = os.environ.get(\"TIME_FROM\", \"00:00\")\nTIME_TO = os.environ.get(\"TIME_TO\", \"23:59\")\nAPI_BASE = f\"{ORG_URL}/api/data/v9.2\"\nCT = ZoneInfo(\"America/Chicago\")\n\ndef get_d365_token():\n    app = ConfidentialClientApplication(D365_CLIENT, authority=f\"https://login.microsoftonline.com/{D365_TENANT}\", client_credential=D365_SECRET)\n    r = app.acquire_token_for_client(scopes=[f\"{ORG_URL}/.default\"])\n    if \"access_token\" not in r: print(f\"D365 auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\ndef get_graph_token():\n    app = ConfidentialClientApplication(GRAPH_CLIENT, authority=f\"https://login.microsoftonline.com/{GRAPH_TENANT}\", client_credential=GRAPH_SECRET)\n    r = app.acquire_token_for_client(scopes=[\"https://graph.microsoft.com/.default\"])\n    if \"access_token\" not in r: print(f\"Graph auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\nS = requests.Session()\n\ndef init_d365(token):\n    S.headers.update({\"Authorization\": f\"Bearer {token}\", \"OData-MaxVersion\": \"4.0\", \"OData-Version\": \"4.0\", \"Accept\": \"application/json\", \"Prefer\": \"odata.include-annotations=*,odata.maxpagesize=5000\"})\n\ndef d365_get(q):\n    url = f\"{API_BASE}/{q}\"\n    rows = []\n    while url:\n        r = S.get(url); r.raise_for_status(); d = r.json()\n        rows.extend(d.get(\"value\", [])); url = d.get(\"@odata.nextLink\")\n    return rows\n\ndef d365_count(q):\n    r = S.get(f\"{API_BASE}/{q}\"); r.raise_for_status(); d = r.json()\n    return d.get(\"@odata.count\", len(d.get(\"value\", [])))\n\ndef get_range():\n    now = datetime.now(CT)\n    start = now - timedelta(hours=LOOKBACK)\n    fh, fm2 = map(int, TIME_FROM.split(\":\"))\n    th, tm2 = map(int, TIME_TO.split(\":\"))\n    start = start.replace(hour=fh, minute=fm2, second=0, microsecond=0)\n    end = now.replace(hour=th, minute=tm2, second=59, microsecond=0)\n    s = start.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    e = end.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    label = f\"{start.strftime('%b %d, %I:%M %p')} - {end.strftime('%b %d, %I:%M %p %Z')}\"\n    return s, e, label\n\ndef count_kpi(rows, field):\n    met = missed = 0\n    for r in rows:\n        st = (r.get(field) or {}).get(\"status\")\n        if st == 4: met += 1\n        elif st == 1: missed += 1\n    return met, missed\n\ndef pct(n, d): return round(n/d*100) if d > 0 else \"N/A\"\ndef sla_pct(m, x): t = m+x; return round(m/t*100) if t > 0 else \"N/A\"\ndef ic(v, tgt, inv=False):\n    if v == \"N/A\": return \"\u2796\"\n    return \"\u2705\" if (inv and v < tgt) or (not inv and v >= tgt) else \"\ud83d\udd34\"\ndef fm(v): return f\"{v}%\" if v != \"N/A\" else \"N/A\"\n\ndef fetch_tier(code, df, s, e):\n    base = f\"casetypecode eq {code} and {df} ge {s} and {df} le {e}\"\n    total = d365_count(f\"incidents?$filter={base}&$count=true&$top=1\")\n    resolved = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    resp = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=firstresponsebykpiid($select=status)\")\n    active = d365_get(f\"incidents?$filter={base} and statecode eq 0&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    sm, sx = count_kpi(resolved, \"resolvebykpiid\")\n    rm, rx = count_kpi(resp, \"firstresponsebykpiid\")\n    breached = sum(1 for r in active if (r.get(\"resolvebykpiid\") or {}).get(\"status\") == 1)\n    return {\"total\": total, \"resolved\": len(resolved), \"sla_met\": sm, \"sla_missed\": sx, \"sla\": sla_pct(sm, sx),\n            \"resp_met\": rm, \"resp_missed\": rx, \"resp_sla\": sla_pct(rm, rx),\n            \"breach\": breached, \"breach_total\": len(active), \"breach_rate\": pct(breached, len(active)) if len(active) > 0 else 0}\n\ndef row(label, val, indent=False):\n    pad = \"padding-left:14px;font-size:12px;\" if indent else \"\"\n    return f'<tr><td style=\"padding:6px 0;color:#555;{pad}\">{label}</td><td style=\"padding:6px 0;text-align:right;font-weight:700;\">{val}</td></tr>'\n\ndef build_html(tiers_data, ph, em, cs, label, config_label):\n    colors = {1: (\"#1565c0\",\"#2196F3\"), 2: (\"#e65100\",\"#FF9800\"), 3: (\"#7b1fa2\",\"#9C27B0\")}\n    tier_html = \"\"\n    for td in tiers_data:\n        c1, c2 = colors.get(td[\"code\"], (\"#333\",\"#666\"))\n        t = td[\"data\"]\n        tier_html += f'''<div style=\"background:linear-gradient(135deg,{c1},{c2});color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;\"><strong>{td[\"name\"]}</strong></div>\n<div style=\"background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;\"><table style=\"width:100%;border-collapse:collapse;font-size:13px;\">\n{row(\"SLA Compliance\", f\"{fm(t['sla'])} {ic(t['sla'],90)}\")}\n{row(f\"  {t['sla_met']} met / {t['sla_missed']} missed\", \"\", True)}\n{row(\"Response SLA\", f\"{fm(t['resp_sla'])} {ic(t['resp_sla'],90)}\")}\n{row(\"Open Breach\", f\"{t['breach_rate']}% {ic(t['breach_rate'],5,True)} ({t['breach']}/{t['breach_total']})\")}\n{row(\"FCR\", f\"{fm(t.get('fcr_rate','N/A'))} {ic(t.get('fcr_rate','N/A'),90)}\")}\n{row(\"Escalation\", f\"{fm(t.get('esc_rate','N/A'))} {ic(t.get('esc_rate','N/A'),10,True)}\")}\n{row(\"Total\", t[\"total\"])}{row(\"Resolved\", t[\"resolved\"])}\n</table></div>'''\n    tc = sum(t[\"data\"][\"total\"] for t in tiers_data)\n    tr = sum(t[\"data\"][\"resolved\"] for t in tiers_data)\n    return f'''<div style=\"font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;\">\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;\">\n<h1 style=\"margin:0;font-size:20px;\">Auto Report</h1>\n<p style=\"margin:4px 0 0;font-size:13px;opacity:0.85;\">{label}</p>\n<p style=\"margin:2px 0 0;font-size:10px;opacity:0.6;\">{config_label}</p></div>\n{tier_html}\n<table style=\"width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;\"><tr>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2D9D78;\">Phone</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",ph[\"total\"])}{row(\"Answered\",ph[\"answered\"])}{row(\"Abandoned\",ph[\"abandoned\"])}{row(\"Rate\",f\"{fm(ph['rate'])} {ic(ph['rate'],95)}\")}</table></td>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2196F3;\">Email</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",em[\"total\"])}{row(\"Responded\",em[\"responded\"])}{row(\"Resolved\",em[\"resolved\"])}</table></td>\n</tr></table>\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;\">\n<strong>OVERALL</strong><table style=\"width:100%;margin-top:12px;\"><tr>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#4FC3F7;\">{tc}</div><div style=\"font-size:10px;color:#a8c6df;\">Created</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{tr}</div><div style=\"font-size:10px;color:#a8c6df;\">Resolved</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{ph[\"answered\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Answered</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#f44336;\">{ph[\"abandoned\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Abandoned</div></td>\n</tr></table></div>\n<p style=\"text-align:center;font-size:10px;color:#999;margin-top:16px;\">Auto-generated from Dynamics 365</p></div>'''\n\ndef send_email(html, label):\n    token = get_graph_token()\n    recipients = [{\"emailAddress\": {\"address\": e.strip()}} for e in SEND_TO.split(\",\") if e.strip()]\n    payload = {\"message\": {\"subject\": f\"Auto Report - {label}\", \"body\": {\"contentType\": \"HTML\", \"content\": html}, \"toRecipients\": recipients, \"from\": {\"emailAddress\": {\"address\": SEND_FROM}}}}\n    r = requests.post(f\"https://graph.microsoft.com/v1.0/users/{SEND_FROM}/sendMail\", headers={\"Authorization\": f\"Bearer {token}\", \"Content-Type\": \"application/json\"}, json=payload)\n    if r.status_code not in (200, 202): print(f\"Email failed ({r.status_code}): {r.text[:300]}\"); sys.exit(1)\n    print(f\"Email sent to {SEND_TO}\")\n\ndef main():\n    print(\"Authenticating D365...\")\n    init_d365(get_d365_token())\n    s, e, label = get_range()\n    print(f\"Report: {label}\")\n    tier_configs = [\n        {\"code\": 1, \"df\": \"createdon\", \"name\": \"Tier 1 - Service Desk\"},\n        {\"code\": 2, \"df\": \"escalatedon\", \"name\": \"Tier 2 - Programming\"},\n        {\"code\": 3, \"df\": \"escalatedon\", \"name\": \"Tier 3 - Relationship Mgrs\"},\n    ]\n    if TIERS != \"ALL\":\n        tier_codes = [int(t.strip()) for t in TIERS.split(\",\")]\n        tier_configs = [tc for tc in tier_configs if tc[\"code\"] in tier_codes]\n    tiers_data = []\n    for tc in tier_configs:\n        print(f\"Querying {tc['name']}...\")\n        t = fetch_tier(tc[\"code\"], tc[\"df\"], s, e)\n        if tc[\"code\"] == 1:\n            fcr = d365_count(f\"incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge {s} and createdon le {e}&$count=true&$top=1\")\n            esc = d365_count(f\"incidents?$filter=casetypecode eq 2 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"fcr_rate\"] = pct(fcr, t[\"total\"]); t[\"esc_rate\"] = pct(esc, t[\"total\"])\n        elif tc[\"code\"] == 2:\n            t2e = d365_count(f\"incidents?$filter=casetypecode eq 3 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"esc_rate\"] = pct(t2e, t[\"total\"])\n        tiers_data.append({**tc, \"data\": t})\n    print(\"Phone...\")\n    try:\n        pb = f\"createdon ge {s} and createdon le {e} and directioncode eq true\"\n        pt = d365_count(f\"phonecalls?$filter={pb}&$count=true&$top=1\")\n        pa = d365_count(f\"phonecalls?$filter={pb} and statecode eq 1&$count=true&$top=1\")\n        ph = {\"total\": pt, \"answered\": pa, \"abandoned\": pt-pa, \"rate\": pct(pa, pt)}\n    except: ph = {\"total\":0,\"answered\":0,\"abandoned\":0,\"rate\":\"N/A\"}\n    print(\"Email...\")\n    eb = f\"caseorigincode eq 2 and createdon ge {s} and createdon le {e}\"\n    em = {\"total\": d365_count(f\"incidents?$filter={eb}&$count=true&$top=1\"),\n          \"responded\": d365_count(f\"incidents?$filter={eb} and firstresponsesent eq true&$count=true&$top=1\"),\n          \"resolved\": d365_count(f\"incidents?$filter={eb} and statecode eq 1&$count=true&$top=1\")}\n    print(\"CSAT...\")\n    try:\n        cr = d365_get(f\"cr7fe_new_csats?$filter=createdon ge {s} and createdon le {e}&$select=cr7fe_new_rating\")\n        sc = [r[\"cr7fe_new_rating\"] for r in cr if r.get(\"cr7fe_new_rating\") is not None]\n        cs = {\"count\": len(sc), \"avg\": round(sum(sc)/len(sc),1) if sc else \"N/A\"}\n    except: cs = {\"count\":0,\"avg\":\"N/A\"}\n    tier_label = \"All Tiers\" if TIERS == \"ALL\" else \", \".join(tc[\"name\"] for tc in tiers_data)\n    member_label = f\"{len(MEMBERS)} members\" if MEMBERS else \"\"\n    config_label = tier_label + (\" | \" + member_label if member_label else \"\")\n    html = build_html(tiers_data, ph, em, cs, label, config_label)\n    print(\"Sending email...\"); send_email(html, label)\n    print(\"Done!\")\n\nif __name__ == \"__main__\": main()\n";
 
-function AutoReportModal({ show, onClose, queues, d365Account }) {
+function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const [view, setView] = useState("list"); // "list" or "edit"
   const [editId, setEditId] = useState(null);
   const [savedReports, setSavedReports] = useState(() => {
@@ -1464,6 +1567,29 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [sendingId, setSendingId] = useState(null);
+  const [sendResult, setSendResult] = useState(null);
+
+  // Refresh saved reports when auto-send log updates (picks up lastSentAt changes)
+  useEffect(() => {
+    try { setSavedReports(JSON.parse(localStorage.getItem("autoReports") || "[]")); } catch {}
+  }, [autoSendLog]);
+
+  const handleSendNow = async (report) => {
+    if (!d365Account) { setSendResult({ id: report.id, ok: false, msg: "Sign in with Microsoft first" }); return; }
+    setSendingId(report.id); setSendResult(null);
+    try {
+      await executeAutoReport(report);
+      const reports = JSON.parse(localStorage.getItem("autoReports") || "[]");
+      const updated = reports.map(r => r.id === report.id ? { ...r, lastSentAt: new Date().toISOString(), lastStatus: "sent" } : r);
+      localStorage.setItem("autoReports", JSON.stringify(updated));
+      setSavedReports(updated);
+      setSendResult({ id: report.id, ok: true, msg: "Sent!" });
+    } catch (err) {
+      setSendResult({ id: report.id, ok: false, msg: err.message?.substring(0, 80) || "Send failed" });
+    }
+    setSendingId(null);
+  };
 
   useEffect(() => {
     if (selectedTier && selectedTier !== "all" && d365Account) {
@@ -1634,25 +1760,39 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {savedReports.map(r => (
-                <div key={r.id} style={{ border: `1.5px solid ${C.border}`, borderRadius: 14, padding: "16px 18px", background: C.bg, position: "relative" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: C.textDark, marginBottom: 2 }}>{r.name || "Untitled Report"}</div>
-                      <div style={{ fontSize: 11, color: C.textLight }}>Saved {new Date(r.savedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+              {savedReports.map(r => {
+                const lastSent = r.lastSentAt ? new Date(r.lastSentAt) : null;
+                const interval = getIntervalMs(r.intervalUnit, r.intervalValue);
+                const nextSend = lastSent ? new Date(lastSent.getTime() + interval) : null;
+                const isActive = !!d365Account;
+                const isSending = sendingId === r.id;
+                const result = sendResult?.id === r.id ? sendResult : null;
+                return (
+                <div key={r.id} style={{ border: `1.5px solid ${r.lastStatus === "error" ? "#f4433640" : isActive ? "#2D9D7830" : C.border}`, borderRadius: 14, padding: "16px 18px", background: C.bg, position: "relative" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: isActive ? (r.lastStatus === "error" ? "#f44336" : "#2D9D78") : "#aaa", flexShrink: 0 }} title={isActive ? "Active" : "Inactive — sign in to D365"} />
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>{r.name || "Untitled Report"}</span>
+                      </div>
+                      {lastSent && <div style={{ fontSize: 10, color: r.lastStatus === "error" ? "#d32f2f" : "#2D9D78", marginLeft: 16 }}>{r.lastStatus === "error" ? `❌ Failed: ${r.lastError || "unknown"}` : `✅ Last sent ${lastSent.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</div>}
+                      {!lastSent && isActive && <div style={{ fontSize: 10, color: C.accent, marginLeft: 16 }}>⏳ Will send shortly...</div>}
+                      {!isActive && <div style={{ fontSize: 10, color: "#999", marginLeft: 16 }}>⚠️ Sign in to D365 to activate</div>}
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => handleSendNow(r)} disabled={!isActive || isSending} title="Send now" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${isActive ? "#2D9D7840" : C.border}`, background: isActive ? "#2D9D7808" : C.bg, cursor: isActive ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, opacity: isSending ? 0.5 : 1 }}>{isSending ? "⏳" : "▶️"}</button>
                       <button onClick={() => loadReport(r)} title="Edit" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✏️</button>
-                      <button onClick={() => handleDownload(r)} title="Download" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>⬇️</button>
                       <button onClick={() => setConfirmDelete(r.id)} title="Delete" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid #f4433620`, background: "#f4433608", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🗑️</button>
                     </div>
                   </div>
+                  {result && <div style={{ fontSize: 11, padding: "6px 10px", borderRadius: 6, marginBottom: 6, background: result.ok ? "#2D9D7812" : "#f4433612", color: result.ok ? "#2D9D78" : "#d32f2f", fontWeight: 600 }}>{result.ok ? "✅ Sent successfully!" : `❌ ${result.msg}`}</div>}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#1565c015", color: "#1565c0", fontWeight: 600 }}>🏢 {r.tierLabel}</span>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}12`, color: C.accent, fontWeight: 600 }}>🔄 {r.cronLabel}</span>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#2D9D7812", color: "#2D9D78", fontWeight: 600 }}>📧 {r.emails.split(",").length} recipient{r.emails.split(",").length !== 1 ? "s" : ""}</span>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.daysDiff}d ({r.fromTime}–{r.toTime})</span>
                     {r.memberNames && r.memberNames.length > 0 && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#7b1fa212", color: "#7b1fa2", fontWeight: 600 }}>👥 {r.memberNames.length} member{r.memberNames.length !== 1 ? "s" : ""}</span>}
+                    {nextSend && isActive && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}08`, color: C.textLight, fontWeight: 500 }}>⏭️ Next: {nextSend.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>}
                   </div>
                   {confirmDelete === r.id && (
                     <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "#f4433610", border: "1px solid #f4433630", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1664,11 +1804,16 @@ function AutoReportModal({ show, onClose, queues, d365Account }) {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
-        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 10, color: d365Account ? "#2D9D78" : "#999", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Account ? "#2D9D78" : "#ccc" }} />
+            {d365Account ? "Auto-send active · checking every 60s" : "Sign in to D365 to enable auto-send"}
+          </div>
           <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
         </div>
       </div>
@@ -1869,6 +2014,39 @@ function Dashboard({ user, onLogout }) {
   const handleD365Login = async () => { const result = await msalLogin(); if (result?.account) { setD365Account(result.account); return result; } return null; };
   const handleD365Logout = async () => { await msalLogoutD365(); setD365Account(null); };
 
+  const [autoSendLog, setAutoSendLog] = useState([]);
+
+  // ─── AUTO REPORT TIMER ───
+  useEffect(() => {
+    if (!d365Account) return;
+    const checkAndSend = async () => {
+      let reports;
+      try { reports = JSON.parse(localStorage.getItem("autoReports") || "[]"); } catch { return; }
+      const now = Date.now();
+      for (const r of reports) {
+        const interval = getIntervalMs(r.intervalUnit, r.intervalValue);
+        const lastSent = r.lastSentAt ? new Date(r.lastSentAt).getTime() : 0;
+        if (now - lastSent >= interval) {
+          try {
+            await executeAutoReport(r);
+            r.lastSentAt = new Date().toISOString();
+            r.lastStatus = "sent";
+            setAutoSendLog(prev => [...prev.slice(-9), { id: r.id, name: r.name, at: r.lastSentAt, status: "sent" }]);
+          } catch (err) {
+            console.error(`[AutoReport] ❌ "${r.name}" failed:`, err);
+            r.lastStatus = "error";
+            r.lastError = err.message;
+            setAutoSendLog(prev => [...prev.slice(-9), { id: r.id, name: r.name, at: new Date().toISOString(), status: "error", error: err.message }]);
+          }
+        }
+      }
+      localStorage.setItem("autoReports", JSON.stringify(reports));
+    };
+    checkAndSend();
+    const timer = setInterval(checkAndSend, 60000);
+    return () => clearInterval(timer);
+  }, [d365Account]);
+
   const [memberData, setMemberData] = useState([]);
 
   const handleRun = async () => {
@@ -2054,7 +2232,7 @@ function Dashboard({ user, onLogout }) {
 `}</style>
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
       <SendReportModal show={showSendModal} onClose={() => setShowSendModal(false)} onSend={handleSendReport} dateLabel={dateLabel} />
-      <AutoReportModal show={showAutoReport} onClose={() => setShowAutoReport(false)} queues={queues} d365Account={d365Account} />
+      <AutoReportModal show={showAutoReport} onClose={() => setShowAutoReport(false)} queues={queues} d365Account={d365Account} autoSendLog={autoSendLog} />
       <div className="no-print dash-header" style={{ background: C.primary, padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
           <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff", flexShrink: 0 }}>S</div>
