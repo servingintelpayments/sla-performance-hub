@@ -1361,13 +1361,13 @@ function MetricCard({ label, value, target, unit, inverse, color, sub }) {
   if (noTarget) {
     const displayVal = isNA ? "N/A" : (typeof value === "string" ? value : `${value}${unit || ""}`);
     return (
-      <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden",  }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
+      <div style={{ background: C.card, borderRadius: 14, border: "none", padding: "22px 24px", position: "relative", overflow: "hidden",  }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark }}>{label}</div>
         </div>
-        <div style={{ height: 10, marginBottom: 8 }} />
+        <div style={{ height: 12, marginBottom: 10 }} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span style={{ fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
+          <span style={{ fontSize: 26, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
         </div>
       </div>
     );
@@ -1381,29 +1381,29 @@ function MetricCard({ label, value, target, unit, inverse, color, sub }) {
   const displayVal = isNA ? "N/A" : `${value}${unit || ""}`;
 
   return (
-    <div style={{ background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", position: "relative", overflow: "hidden",  }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.textDark }}>{label}</div>
-        <div style={{ padding: "3px 10px", borderRadius: 10, background: pillColor, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>{met === null ? "N/A" : met ? "Met" : "Miss"}</div>
+    <div style={{ background: C.card, borderRadius: 14, border: "none", padding: "22px 24px", position: "relative", overflow: "hidden",  }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark }}>{label}</div>
+        <div style={{ padding: "4px 12px", borderRadius: 10, background: pillColor, color: "#fff", fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>{met === null ? "N/A" : met ? "Met" : "Miss"}</div>
       </div>
-      <div style={{ height: 10, background: `${barColor}18`, borderRadius: 5, overflow: "hidden", marginBottom: 8 }}>
-        <div style={{ height: "100%", width: `${Math.min(100, Math.max(2, pct))}%`, background: barColor, borderRadius: 5, transition: "width 0.6s ease" }} />
+      <div style={{ height: 12, background: `${barColor}18`, borderRadius: 6, overflow: "hidden", marginBottom: 10 }}>
+        <div style={{ height: "100%", width: `${Math.min(100, Math.max(2, pct))}%`, background: barColor, borderRadius: 6, transition: "width 0.6s ease" }} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
-        <span style={{ fontSize: 11, color: C.textLight }}>Target: {target}{unit || ""}</span>
+        <span style={{ fontSize: 26, fontWeight: 800, color: C.textDark, fontFamily: "'Space Mono', monospace" }}>{displayVal}</span>
+        <span style={{ fontSize: 12, color: C.textLight }}>Target: {target}{unit || ""}</span>
       </div>
-      {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: C.textLight, marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
 
 function StatCard({ label, value, sub, color }) {
   return (
-    <div style={{ flex: 1, minWidth: 100, background: C.card, borderRadius: 10, border: "none", padding: "14px 16px", textAlign: "center",  }}>
-      <div style={{ fontSize: 10, fontWeight: 600, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 800, color: color || C.textDark, fontFamily: "'Space Mono', monospace", lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>{sub}</div>}
+    <div style={{ flex: 1, minWidth: 120, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px", textAlign: "center",  }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 32, fontWeight: 800, color: color || C.textDark, fontFamily: "'Space Mono', monospace", lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: C.textLight, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -1432,10 +1432,10 @@ function TierSection({ tier, data, members }) {
   }
   return (
     <div style={{ marginBottom: 24 }}>
-      <div style={{ background: `linear-gradient(135deg, ${t.color}, ${t.colorDark})`, borderRadius: "14px 14px 0 0", padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: `linear-gradient(135deg, ${t.color}, ${t.colorDark})`, borderRadius: "14px 14px 0 0", padding: "24px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#fff" }}>{t.label} {t.name}</h3>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 4 }}>{t.desc}</div>
+          <h3 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: "#fff" }}>{t.label} {t.name}</h3>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", marginTop: 4 }}>{t.desc}</div>
         </div>
         {tierMembers.length > 0 && (
           <div style={{ display: "flex", gap: -8 }}>
@@ -1446,15 +1446,15 @@ function TierSection({ tier, data, members }) {
           </div>
         )}
       </div>
-      <div className="stat-row" style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
+      <div className="stat-row" style={{ display: "flex", gap: 12, padding: "20px 0", overflowX: "auto" }}>
         <StatCard label={`${t.label} SLA Rate`} value={slaRate === "N/A" ? "N/A" : `${slaRate}%`} color={slaRate !== "N/A" && slaRate >= 90 ? "#2D9D78" : "#E5544B"} />
         <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color="#2D9D78" />
         <StatCard label="SLAs Missed" value={`${slaMissed}/${slaTotal}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
         <StatCard label="Total Cases" value={d.total} color={t.colorDark} />
         <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
       </div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>{t.label} SLA Status — All Metrics</div>
-      <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>{t.label} SLA Status — All Metrics</div>
+      <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {metrics.map((m, i) => (<MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />))}
       </div>
       {tier === 1 && data.phone && (() => {
@@ -1464,18 +1464,18 @@ function TierSection({ tier, data, members }) {
         const answerRate = data.phone.answerRate ?? 0;
         const avgAHT = data.phone.avgAHT ?? "N/A";
         const MR = ({ icon, label, value, accent, badge }) => (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 15 }}>{icon}</span><span style={{ fontSize: 13, color: C.textMid }}>{label}</span></div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 17 }}>{icon}</span><span style={{ fontSize: 14, color: C.textMid }}>{label}</span></div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 18, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
               {badge && <span style={{ fontSize: 11, width: 18, height: 18, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: badge === "met" ? "#2D9D78" : "#E5544B", color: "#fff" }}>{badge === "met" ? "✓" : "!"}</span>}
             </div>
           </div>
         );
         return (<>
-          <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px",  }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 18 }}>📞</span> PHONE METRICS
+          <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 20 }}>📞</span> PHONE METRICS
               {data.phone8x8 && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>8x8 LIVE</span>}
               {!data.phone8x8 && <span style={{ fontSize: 9, background: C.d365, color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>D365</span>}
             </div>
@@ -1488,8 +1488,8 @@ function TierSection({ tier, data, members }) {
             <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
           {data.email && (
-            <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px",  }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.blue, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 18 }}>📧</span> EMAIL METRICS</div>
+            <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.blue, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 20 }}>📧</span> EMAIL METRICS</div>
               <MR icon="📨" label="Total Email Cases" value={data.email.total ?? 0} accent={C.textDark} />
               <MR icon="💬" label="Responded" value={data.email.responded ?? 0} accent={C.orange} badge={(data.email.responded ?? 0) > 0 ? "miss" : "met"} />
               <MR icon="✅" label="Resolved" value={data.email.resolved ?? 0} accent="#2D9D78" badge="met" />
@@ -1511,10 +1511,10 @@ function OverallSummary({ data }) {
     { label: "Abandoned", value: d.abandonedCalls, color: d.abandonedCalls > 0 ? "#f44336" : "#81C784" },
   ];
   return (
-    <div style={{ background: C.primary, padding: "24px 28px", borderRadius: 14, marginBottom: 4 }}>
-      <h3 style={{ margin: "0 0 20px", color: "#fff", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📈 OVERALL SUMMARY</h3>
-      <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 12 }}>
-        {items.map((it) => (<div key={it.label} style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div><div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div></div>))}
+    <div style={{ background: C.primary, padding: "28px 32px", borderRadius: 14, marginBottom: 4 }}>
+      <h3 style={{ margin: "0 0 24px", color: "#fff", fontSize: 20, fontWeight: 700, textAlign: "center" }}>📈 OVERALL SUMMARY</h3>
+      <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 16 }}>
+        {items.map((it) => (<div key={it.label} style={{ textAlign: "center" }}><div style={{ fontSize: 38, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div><div style={{ fontSize: 13, color: "#a8c6df", marginTop: 4 }}>{it.label}</div></div>))}
       </div>
     </div>
   );
@@ -1574,34 +1574,34 @@ function MemberSection({ memberData, index }) {
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
   ];
   const PhoneStat = ({ icon, label, value, accent }) => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 16 }}>{icon}</span><span style={{ fontSize: 13, color: C.textMid }}>{label}</span></div>
-      <span style={{ fontSize: 18, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 17 }}>{icon}</span><span style={{ fontSize: 14, color: C.textMid }}>{label}</span></div>
+      <span style={{ fontSize: 20, fontWeight: 700, color: accent || C.textDark, fontFamily: "'Space Mono', monospace" }}>{value}</span>
     </div>
   );
   return (
-    <div style={{ marginBottom: 24 }}>
-      <div style={{ background: `linear-gradient(135deg, ${color}, ${colorDark})`, borderRadius: "14px 14px 0 0", padding: "20px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ background: `linear-gradient(135deg, ${color}, ${colorDark})`, borderRadius: "14px 14px 0 0", padding: "24px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700, color: "#fff" }}>{m.avatar}</div>
-          <div><div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{m.name}</div><div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div></div>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 700, color: "#fff" }}>{m.avatar}</div>
+          <div><div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>{m.name}</div><div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div></div>
         </div>
       </div>
-      <div className="stat-row" style={{ display: "flex", gap: 10, padding: "16px 0", overflowX: "auto" }}>
+      <div className="stat-row" style={{ display: "flex", gap: 12, padding: "20px 0", overflowX: "auto" }}>
         <StatCard label="Cases Owned" value={d.totalCases} color={color} />
         <StatCard label="Cases Created" value={d.casesCreatedBy ?? "—"} color={C.blue} />
         <StatCard label="Resolved" value={d.resolvedCases} color="#2D9D78" />
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
         <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: C.textDark, marginBottom: 12 }}>Performance Metrics</div>
-      <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>Performance Metrics</div>
+      <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
       </div>
       {isTier1 && (
-        <div style={{ marginTop: 16, background: C.card, borderRadius: 12, border: "none", padding: "18px 20px",  }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#E91E63", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>📞</span> Phone Activity
+        <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>📞</span> Phone Activity
             {d.phoneSource === "8x8" && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>8x8 LIVE</span>}
           </div>
           <PhoneStat icon="📞" label="Total Calls" value={d.totalPhoneCalls ?? 0} accent={C.textDark} />
@@ -1633,10 +1633,10 @@ function TeamSummary({ memberDataList }) {
     { label: "SLA Met", value: totals.slaMet, color: "#81C784" },
   ];
   return (
-    <div style={{ background: C.primary, padding: "24px 28px", borderRadius: 14, marginBottom: 16 }}>
-      <h3 style={{ margin: "0 0 20px", color: "#fff", fontSize: 16, fontWeight: 700, textAlign: "center" }}>📈 TEAM SUMMARY — {memberDataList.length} Member{memberDataList.length > 1 ? "s" : ""}</h3>
-      <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 12 }}>
-        {items.map((it) => (<div key={it.label} style={{ textAlign: "center" }}><div style={{ fontSize: 32, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div><div style={{ fontSize: 11, color: "#a8c6df", marginTop: 2 }}>{it.label}</div></div>))}
+    <div style={{ background: C.primary, padding: "28px 32px", borderRadius: 14, marginBottom: 16 }}>
+      <h3 style={{ margin: "0 0 24px", color: "#fff", fontSize: 20, fontWeight: 700, textAlign: "center" }}>📈 TEAM SUMMARY — {memberDataList.length} Member{memberDataList.length > 1 ? "s" : ""}</h3>
+      <div style={{ display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 16 }}>
+        {items.map((it) => (<div key={it.label} style={{ textAlign: "center" }}><div style={{ fontSize: 38, fontWeight: 700, color: it.color, fontFamily: "'Space Mono', monospace" }}>{it.value}</div><div style={{ fontSize: 13, color: "#a8c6df", marginTop: 4 }}>{it.label}</div></div>))}
       </div>
       {totals.totalCases > 0 && (
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
@@ -2716,7 +2716,7 @@ function Dashboard({ user, onLogout }) {
         </div>
       </div>
       <ConnectionBar d365Connected={!!d365Account} isLive={isLive} onOpenSettings={() => setShowSettings(true)} />
-      <div className="dash-layout" style={{ display: "flex", maxWidth: 1500, margin: "0 auto" }}>
+      <div className="dash-layout" style={{ display: "flex", width: "100%", margin: "0 auto" }}>
         <div className="no-print dash-sidebar" style={{ width: 310, minWidth: 310, background: C.card, borderRight: `1px solid ${C.border}`, padding: "24px 20px", minHeight: "calc(100vh - 110px)", display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>Configure Report</div>
           {d365Account && (
@@ -2764,7 +2764,7 @@ function Dashboard({ user, onLogout }) {
           {hasRun && <button onClick={() => setShowSendModal(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${d365Account ? "#0078D4" : C.border}`, background: d365Account ? "#0078D410" : C.card, color: d365Account ? "#0078D4" : C.textLight, fontSize: 13, fontWeight: 600, cursor: d365Account ? "pointer" : "not-allowed", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📤</span> Send Report{!d365Account && <span style={{ fontSize: 9, opacity: 0.7 }}>(sign in first)</span>}</button>}
           <button onClick={() => setShowAutoReport(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid #FF980060`, background: "#FF980008", color: "#e65100", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, position: "relative" }}><span>⏰</span> Auto Reports{(() => { try { const c = JSON.parse(localStorage.getItem("autoReports") || "[]").length; return c > 0 ? <span style={{ background: C.accent, color: "#fff", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 10, marginLeft: 4 }}>{c}</span> : null; } catch { return null; } })()}</button>
         </div>
-        <div className="dash-main" style={{ flex: 1, padding: "24px 28px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
+        <div className="dash-main" style={{ flex: 1, padding: "32px 40px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
           {!hasRun ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", textAlign: "center" }}>
               <div style={{ width: 100, height: 100, borderRadius: 24, background: `linear-gradient(135deg, ${C.accent}15, ${C.yellow}15)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>📊</div>
@@ -2783,8 +2783,8 @@ function Dashboard({ user, onLogout }) {
             <div style={{ animation: "slideIn 0.4s ease" }} ref={reportRef}>
               <div style={{ marginBottom: 24, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Operations Report`}</h2>
-                  <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <h2 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>📊 {memberData.length > 0 ? "Individual Performance Report" : `${reportType === "weekly" ? "Weekly" : reportType === "daily" ? "Daily" : "Custom"} Operations Report`}</h2>
+                  <div style={{ fontSize: 14, color: C.textMid, marginTop: 6, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     {selectedQueue && <span>🏢 {selectedQueue === "all" ? "All Tiers" : (queues.find(q => q.id === selectedQueue)?.tierLabel?.replace(" 🔒", "") || "Tier")}</span>}
                     <span>👥 {selectedMembers.length > 0 ? `${selectedMembers.length} member${selectedMembers.length > 1 ? "s" : ""}` : "All tier members"}</span>
                     <span>📅 {dateLabel}</span>
