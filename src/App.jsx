@@ -15,7 +15,7 @@ import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/ms
 /* ─── MSAL CONFIGURATION ─── */
 const MSAL_CONFIG = {
   auth: {
-    clientId: "3df6c0f7-b009-47a3-87f2-82172d866bdf",
+    clientId: "0918449d-b73e-428a-8238-61723f2a2e7d",
     authority: "https://login.microsoftonline.com/1b0086bd-aeda-4c74-a15a-23adfe4d0693",
     redirectUri: window.location.origin + window.location.pathname,
   },
