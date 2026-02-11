@@ -1285,6 +1285,16 @@ async function executeAutoReport(report) {
     if (period === "yesterday") {
       const y = new Date(); y.setDate(y.getDate() - 1);
       sd = fmt(y); ed = fmt(y);
+    } else if (period === "last_week") {
+      const d = new Date(); const day = d.getDay();
+      const lastSun = new Date(d); lastSun.setDate(d.getDate() - (day === 0 ? 0 : day));
+      const lastMon = new Date(lastSun); lastMon.setDate(lastSun.getDate() - 6);
+      sd = fmt(lastMon); ed = fmt(lastSun);
+    } else if (period === "last_month") {
+      const firstThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastDayPrev = new Date(firstThisMonth - 1);
+      const firstPrev = new Date(lastDayPrev.getFullYear(), lastDayPrev.getMonth(), 1);
+      sd = fmt(firstPrev); ed = fmt(lastDayPrev);
     } else if (period === "last_7") {
       const s = new Date(); s.setDate(s.getDate() - 7);
       sd = fmt(s); ed = fmt(new Date(today - 86400000));
@@ -2050,7 +2060,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const handleDownload = (report) => {
     const tc = report.selectedTier === "all" ? "ALL" : String(report.tierNum || 1);
     const period = report.reportPeriod || "custom";
-    const lh = period === "yesterday" ? 24 : period === "last_7" ? 168 : period === "last_14" ? 336 : period === "last_30" ? 720 : report.daysDiff * 24;
+    const lh = period === "yesterday" ? 24 : period === "last_week" ? 168 : period === "last_month" ? 744 : period === "last_7" ? 168 : period === "last_14" ? 336 : period === "last_30" ? 720 : report.daysDiff * 24;
     const mids = (report.autoMembers || []).join(",");
     const yamlLines = [
       "name: Auto KPI Report - " + report.name, "on:", "  schedule:",
@@ -2081,7 +2091,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
       "- Tier: " + report.tierLabel,
       "- Members: " + (report.memberNames.length > 0 ? report.memberNames.join(", ") : "All"),
       "- Schedule: " + report.cronLabel,
-      "- Period: " + (period === "yesterday" ? "Yesterday" : period === "last_7" ? "Last 7 Days" : period === "last_14" ? "Last 14 Days" : period === "last_30" ? "Last 30 Days" : report.daysDiff + " day(s) custom"),
+      "- Period: " + (period === "yesterday" ? "Yesterday" : period === "last_week" ? "Last Week (Mon–Sun)" : period === "last_month" ? "Last Month" : period === "last_7" ? "Last 7 Days" : period === "last_14" ? "Last 14 Days" : period === "last_30" ? "Last 30 Days" : report.daysDiff + " day(s) custom"),
       "- Time: " + report.fromTime + " - " + report.toTime,
       "- Recipients: " + report.emails, "",
       "## Setup", "",
@@ -2183,7 +2193,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}12`, color: C.accent, fontWeight: 600 }}>🔄 {r.cronLabel || "Every day"}</span>
                     {r.sendAtTime && (r.intervalUnit === "Day" || r.intervalUnit === "Month" || r.intervalUnit === "Year") && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#9C27B012", color: "#7b1fa2", fontWeight: 600 }}>🕐 {r.sendAtTime} CT</span>}
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#2D9D7812", color: "#2D9D78", fontWeight: 600 }}>📧 {r.emails.split(",").length} recipient{r.emails.split(",").length !== 1 ? "s" : ""}</span>
-                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.reportPeriod === "yesterday" ? "Yesterday" : r.reportPeriod === "last_7" ? "Last 7 Days" : r.reportPeriod === "last_14" ? "Last 14 Days" : r.reportPeriod === "last_30" ? "Last 30 Days" : `${r.daysDiff}d`} ({r.fromTime}–{r.toTime})</span>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.reportPeriod === "yesterday" ? "Yesterday" : r.reportPeriod === "last_week" ? "Last Week (Mon–Sun)" : r.reportPeriod === "last_month" ? "Last Month" : r.reportPeriod === "last_7" ? "Last 7 Days" : r.reportPeriod === "last_14" ? "Last 14 Days" : r.reportPeriod === "last_30" ? "Last 30 Days" : `${r.daysDiff}d`} ({r.fromTime}–{r.toTime})</span>
                     {r.memberNames && r.memberNames.length > 0 && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#7b1fa212", color: "#7b1fa2", fontWeight: 600 }}>👥 {r.memberNames.length} member{r.memberNames.length !== 1 ? "s" : ""}</span>}
                     {nextSend && isActive && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}08`, color: C.textLight, fontWeight: 500 }}>⏭️ Next: {nextSend.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>}
                   </div>
@@ -2263,21 +2273,35 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
               const p = e.target.value;
               setReportPeriod(p);
               const today = new Date();
+              const fmt = d => d.toISOString().split("T")[0];
               if (p === "yesterday") {
                 const y = new Date(); y.setDate(y.getDate() - 1);
-                setStartDate(y.toISOString().split("T")[0]); setEndDate(y.toISOString().split("T")[0]);
+                setStartDate(fmt(y)); setEndDate(fmt(y));
+              } else if (p === "last_week") {
+                // Last Monday to last Sunday
+                const d = new Date(); const day = d.getDay();
+                const lastSun = new Date(d); lastSun.setDate(d.getDate() - (day === 0 ? 0 : day));
+                const lastMon = new Date(lastSun); lastMon.setDate(lastSun.getDate() - 6);
+                setStartDate(fmt(lastMon)); setEndDate(fmt(lastSun));
+              } else if (p === "last_month") {
+                const firstThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                const lastDayPrev = new Date(firstThisMonth - 1);
+                const firstPrev = new Date(lastDayPrev.getFullYear(), lastDayPrev.getMonth(), 1);
+                setStartDate(fmt(firstPrev)); setEndDate(fmt(lastDayPrev));
               } else if (p === "last_7") {
                 const s = new Date(); s.setDate(s.getDate() - 7);
-                setStartDate(s.toISOString().split("T")[0]); setEndDate(new Date(today - 86400000).toISOString().split("T")[0]);
+                setStartDate(fmt(s)); setEndDate(fmt(new Date(today - 86400000)));
               } else if (p === "last_14") {
                 const s = new Date(); s.setDate(s.getDate() - 14);
-                setStartDate(s.toISOString().split("T")[0]); setEndDate(new Date(today - 86400000).toISOString().split("T")[0]);
+                setStartDate(fmt(s)); setEndDate(fmt(new Date(today - 86400000)));
               } else if (p === "last_30") {
                 const s = new Date(); s.setDate(s.getDate() - 30);
-                setStartDate(s.toISOString().split("T")[0]); setEndDate(new Date(today - 86400000).toISOString().split("T")[0]);
+                setStartDate(fmt(s)); setEndDate(fmt(new Date(today - 86400000)));
               }
             }} style={{ ...inputSt, cursor: "pointer", appearance: "auto", marginBottom: 8 }}>
               <option value="yesterday">Yesterday</option>
+              <option value="last_week">Last Week (Mon – Sun)</option>
+              <option value="last_month">Last Month</option>
               <option value="last_7">Last 7 Days</option>
               <option value="last_14">Last 14 Days</option>
               <option value="last_30">Last 30 Days</option>
@@ -2342,7 +2366,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
             <div style={{ fontSize: 12, color: C.textMid, lineHeight: 1.7 }}>
               <div>🏢 <strong>Tier:</strong> {tierLabel}</div>
               {autoMembers.length > 0 && <div>👥 <strong>Members:</strong> {memberNames.slice(0, 3).join(", ")}{autoMembers.length > 3 ? ` +${autoMembers.length - 3} more` : ""}</div>}
-              <div>📅 <strong>Date range:</strong> {reportPeriod === "yesterday" ? "Yesterday (dynamic)" : reportPeriod === "last_7" ? "Last 7 Days (dynamic)" : reportPeriod === "last_14" ? "Last 14 Days (dynamic)" : reportPeriod === "last_30" ? "Last 30 Days (dynamic)" : `${startDate} to ${endDate}`} ({fromTime} — {toTime})</div>
+              <div>📅 <strong>Date range:</strong> {reportPeriod === "yesterday" ? "Yesterday (dynamic)" : reportPeriod === "last_week" ? "Last Week, Mon–Sun (dynamic)" : reportPeriod === "last_month" ? "Last Month (dynamic)" : reportPeriod === "last_7" ? "Last 7 Days (dynamic)" : reportPeriod === "last_14" ? "Last 14 Days (dynamic)" : reportPeriod === "last_30" ? "Last 30 Days (dynamic)" : `${startDate} to ${endDate}`} ({fromTime} — {toTime})</div>
               <div>🔄 <strong>Frequency:</strong> {cronLabel}</div>
               <div>📧 <strong>Recipients:</strong> {emails || "(enter emails above)"}</div>
             </div>
