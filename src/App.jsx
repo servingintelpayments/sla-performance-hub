@@ -1277,8 +1277,27 @@ function getIntervalMs(unit, value) {
 
 async function executeAutoReport(report) {
   console.log(`[AutoReport] Sending "${report.name}"...`);
-  const data = await fetchLiveData({}, report.startDate, report.endDate, () => {}, report.fromTime, report.toTime);
-  const dateLabel = `${report.startDate} to ${report.endDate} (${report.fromTime} — ${report.toTime})`;
+  let sd = report.startDate, ed = report.endDate;
+  const period = report.reportPeriod || "custom";
+  if (period !== "custom") {
+    const today = new Date();
+    const fmt = d => d.toISOString().split("T")[0];
+    if (period === "yesterday") {
+      const y = new Date(); y.setDate(y.getDate() - 1);
+      sd = fmt(y); ed = fmt(y);
+    } else if (period === "last_7") {
+      const s = new Date(); s.setDate(s.getDate() - 7);
+      sd = fmt(s); ed = fmt(new Date(today - 86400000));
+    } else if (period === "last_14") {
+      const s = new Date(); s.setDate(s.getDate() - 14);
+      sd = fmt(s); ed = fmt(new Date(today - 86400000));
+    } else if (period === "last_30") {
+      const s = new Date(); s.setDate(s.getDate() - 30);
+      sd = fmt(s); ed = fmt(new Date(today - 86400000));
+    }
+  }
+  const data = await fetchLiveData({}, sd, ed, () => {}, report.fromTime, report.toTime);
+  const dateLabel = `${sd} to ${ed} (${report.fromTime} — ${report.toTime})`;
   const html = buildAutoEmailHTML(data, dateLabel);
   if (!html) throw new Error("No report data generated");
   await sendEmailViaGraph(report.emails, `📊 Auto Report: ${report.name} — ${dateLabel}`, html);
@@ -1909,6 +1928,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const [autoMembers, setAutoMembers] = useState([]);
   const [autoMembersList, setAutoMembersList] = useState([]);
   const [loadingAutoMembers, setLoadingAutoMembers] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState("yesterday");
   const [startDate, setStartDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [fromTime, setFromTime] = useState("00:00");
@@ -1984,6 +2004,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const resetForm = () => {
     setReportName(""); setEmails(""); setIntervalValue(1); setIntervalUnit("Day");
     setSelectedTier(""); setAutoMembers([]); setAutoMembersList([]);
+    setReportPeriod("yesterday");
     const d = new Date(); const y = new Date(); y.setDate(y.getDate() - 1);
     setStartDate(y.toISOString().split("T")[0]); setEndDate(d.toISOString().split("T")[0]);
     setFromTime("00:00"); setToTime("23:59"); setGenerated(false); setEditId(null);
@@ -1993,6 +2014,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
     setEditId(r.id); setReportName(r.name || ""); setEmails(r.emails || "");
     setIntervalValue(r.intervalValue || 1); setIntervalUnit(r.intervalUnit || "Day");
     setSelectedTier(r.selectedTier || ""); setAutoMembers(r.autoMembers || []);
+    setReportPeriod(r.reportPeriod || "custom");
     setStartDate(r.startDate || ""); setEndDate(r.endDate || "");
     setFromTime(r.fromTime || "00:00"); setToTime(r.toTime || "23:59");
     setGenerated(false); setView("edit");
@@ -2006,7 +2028,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
       intervalValue, intervalUnit, cronExpr, cronLabel,
       selectedTier, tierLabel, tierNum,
       autoMembers: [...autoMembers], memberNames: [...memberNames],
-      startDate, endDate, fromTime, toTime, daysDiff,
+      reportPeriod, startDate, endDate, fromTime, toTime, daysDiff,
       savedAt: new Date().toISOString(),
     };
     const updated = editId ? savedReports.map(r => r.id === editId ? config : r) : [...savedReports, config];
@@ -2021,7 +2043,8 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
 
   const handleDownload = (report) => {
     const tc = report.selectedTier === "all" ? "ALL" : String(report.tierNum || 1);
-    const lh = report.daysDiff * 24;
+    const period = report.reportPeriod || "custom";
+    const lh = period === "yesterday" ? 24 : period === "last_7" ? 168 : period === "last_14" ? 336 : period === "last_30" ? 720 : report.daysDiff * 24;
     const mids = (report.autoMembers || []).join(",");
     const yamlLines = [
       "name: Auto KPI Report - " + report.name, "on:", "  schedule:",
@@ -2052,7 +2075,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
       "- Tier: " + report.tierLabel,
       "- Members: " + (report.memberNames.length > 0 ? report.memberNames.join(", ") : "All"),
       "- Schedule: " + report.cronLabel,
-      "- Lookback: " + report.daysDiff + " day(s)",
+      "- Period: " + (period === "yesterday" ? "Yesterday" : period === "last_7" ? "Last 7 Days" : period === "last_14" ? "Last 14 Days" : period === "last_30" ? "Last 30 Days" : report.daysDiff + " day(s) custom"),
       "- Time: " + report.fromTime + " - " + report.toTime,
       "- Recipients: " + report.emails, "",
       "## Setup", "",
@@ -2139,7 +2162,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#1565c015", color: "#1565c0", fontWeight: 600 }}>🏢 {r.tierLabel}</span>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}12`, color: C.accent, fontWeight: 600 }}>🔄 {r.cronLabel}</span>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#2D9D7812", color: "#2D9D78", fontWeight: 600 }}>📧 {r.emails.split(",").length} recipient{r.emails.split(",").length !== 1 ? "s" : ""}</span>
-                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.daysDiff}d ({r.fromTime}–{r.toTime})</span>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.reportPeriod === "yesterday" ? "Yesterday" : r.reportPeriod === "last_7" ? "Last 7 Days" : r.reportPeriod === "last_14" ? "Last 14 Days" : r.reportPeriod === "last_30" ? "Last 30 Days" : `${r.daysDiff}d`} ({r.fromTime}–{r.toTime})</span>
                     {r.memberNames && r.memberNames.length > 0 && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#7b1fa212", color: "#7b1fa2", fontWeight: 600 }}>👥 {r.memberNames.length} member{r.memberNames.length !== 1 ? "s" : ""}</span>}
                     {nextSend && isActive && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}08`, color: C.textLight, fontWeight: 500 }}>⏭️ Next: {nextSend.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>}
                   </div>
@@ -2212,21 +2235,49 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
             </div>
           )}
 
-          {/* DATE RANGE */}
+          {/* REPORT PERIOD */}
           <div style={{ marginBottom: 16 }}>
-            <div style={labelSt}><span>📅</span> Date Range</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-              <label><div style={subSt}>From</div><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
-              <label><div style={subSt}>To</div><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div style={labelSt}><span>📅</span> Report Period</div>
+            <select value={reportPeriod} onChange={e => {
+              const p = e.target.value;
+              setReportPeriod(p);
+              const today = new Date();
+              if (p === "yesterday") {
+                const y = new Date(); y.setDate(y.getDate() - 1);
+                setStartDate(y.toISOString().split("T")[0]); setEndDate(y.toISOString().split("T")[0]);
+              } else if (p === "last_7") {
+                const s = new Date(); s.setDate(s.getDate() - 7);
+                setStartDate(s.toISOString().split("T")[0]); setEndDate(new Date(today - 86400000).toISOString().split("T")[0]);
+              } else if (p === "last_14") {
+                const s = new Date(); s.setDate(s.getDate() - 14);
+                setStartDate(s.toISOString().split("T")[0]); setEndDate(new Date(today - 86400000).toISOString().split("T")[0]);
+              } else if (p === "last_30") {
+                const s = new Date(); s.setDate(s.getDate() - 30);
+                setStartDate(s.toISOString().split("T")[0]); setEndDate(new Date(today - 86400000).toISOString().split("T")[0]);
+              }
+            }} style={{ ...inputSt, cursor: "pointer", appearance: "auto", marginBottom: 8 }}>
+              <option value="yesterday">Yesterday</option>
+              <option value="last_7">Last 7 Days</option>
+              <option value="last_14">Last 14 Days</option>
+              <option value="last_30">Last 30 Days</option>
+              <option value="custom">Custom Date Range</option>
+            </select>
+            {reportPeriod !== "custom" && (
+              <div style={{ fontSize: 11, color: C.textLight, padding: "6px 10px", background: C.bg, borderRadius: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>💡</span> Dates will be calculated dynamically each time the report runs
+              </div>
+            )}
+            {reportPeriod === "custom" && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
+                  <label><div style={subSt}>From</div><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
+                  <label><div style={subSt}>To</div><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
+                </div>
+              </>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
               <label><div style={subSt}>From Time</div><input type="time" value={fromTime} onChange={e => setFromTime(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
               <label><div style={subSt}>To Time</div><input type="time" value={toTime} onChange={e => setToTime(e.target.value)} style={{ ...inputSt, fontSize: 11, fontFamily: "'Space Mono', monospace", padding: "8px 8px" }} /></label>
-            </div>
-            <div style={{ display: "flex", gap: 5 }}>
-              {[{ l: "7D", d: 7 }, { l: "14D", d: 14 }, { l: "30D", d: 30 }, { l: "90D", d: 90 }, { l: "YTD", d: Math.round((new Date() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) }].map(q =>
-                <button key={q.l} onClick={() => setQuickRange(q.d)} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${daysDiff === q.d ? C.accent : C.border}`, background: daysDiff === q.d ? C.accentLight : "transparent", fontSize: 10, fontWeight: 600, color: daysDiff === q.d ? C.accent : C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>
-              )}
             </div>
           </div>
 
@@ -2256,7 +2307,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
             <div style={{ fontSize: 12, color: C.textMid, lineHeight: 1.7 }}>
               <div>🏢 <strong>Tier:</strong> {tierLabel}</div>
               {autoMembers.length > 0 && <div>👥 <strong>Members:</strong> {memberNames.slice(0, 3).join(", ")}{autoMembers.length > 3 ? ` +${autoMembers.length - 3} more` : ""}</div>}
-              <div>📅 <strong>Date range:</strong> {startDate} to {endDate} ({fromTime} — {toTime})</div>
+              <div>📅 <strong>Date range:</strong> {reportPeriod === "yesterday" ? "Yesterday (dynamic)" : reportPeriod === "last_7" ? "Last 7 Days (dynamic)" : reportPeriod === "last_14" ? "Last 14 Days (dynamic)" : reportPeriod === "last_30" ? "Last 30 Days (dynamic)" : `${startDate} to ${endDate}`} ({fromTime} — {toTime})</div>
               <div>🔄 <strong>Frequency:</strong> {cronLabel}</div>
               <div>📧 <strong>Recipients:</strong> {emails || "(enter emails above)"}</div>
             </div>
