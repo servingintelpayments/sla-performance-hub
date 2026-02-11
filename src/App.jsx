@@ -1923,6 +1923,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const [emails, setEmails] = useState("");
   const [intervalValue, setIntervalValue] = useState(1);
   const [intervalUnit, setIntervalUnit] = useState("Day");
+  const [sendAtTime, setSendAtTime] = useState("07:00");
   const [reportName, setReportName] = useState("");
   const [selectedTier, setSelectedTier] = useState("");
   const [autoMembers, setAutoMembers] = useState([]);
@@ -1977,15 +1978,19 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
     : intervalUnit === "Month" ? intervalValue * 720
     : intervalValue * 8760;
 
+  const [sendHour, sendMinute] = sendAtTime.split(":").map(Number);
+  // Convert local CT to UTC for cron (CT = UTC-6, CDT = UTC-5)
+  const utcHour = (sendHour + 6) % 24;
+
   const cronExpr = intervalUnit === "Minute" ? (intervalValue <= 1 ? "* * * * *" : `*/${intervalValue} * * * *`)
-    : intervalUnit === "Hour" ? (intervalValue <= 1 ? "0 * * * *" : `0 */${intervalValue} * * *`)
-    : intervalUnit === "Day" ? (intervalValue <= 1 ? "1 6 * * *" : `1 6 */${intervalValue} * *`)
-    : intervalUnit === "Month" ? `1 6 1 */${intervalValue} *`
-    : `1 6 1 1 *`;
+    : intervalUnit === "Hour" ? (intervalValue <= 1 ? `${sendMinute} * * * *` : `${sendMinute} */${intervalValue} * * *`)
+    : intervalUnit === "Day" ? (intervalValue <= 1 ? `${sendMinute} ${utcHour} * * *` : `${sendMinute} ${utcHour} */${intervalValue} * *`)
+    : intervalUnit === "Month" ? `${sendMinute} ${utcHour} 1 */${intervalValue} *`
+    : `${sendMinute} ${utcHour} 1 1 *`;
 
   const cronLabel = intervalValue === 1
-    ? `Every ${intervalUnit.toLowerCase()}`
-    : `Every ${intervalValue} ${intervalUnit.toLowerCase()}s`;
+    ? `Every ${intervalUnit.toLowerCase()} at ${sendAtTime}`
+    : `Every ${intervalValue} ${intervalUnit.toLowerCase()}s at ${sendAtTime}`;
 
   const tierObj = queues.find(q => q.id === selectedTier);
   const tierLabel = selectedTier === "all" ? "All Tiers" : (tierObj?.tierLabel || "Not selected");
@@ -2002,7 +2007,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const daysDiff = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000));
 
   const resetForm = () => {
-    setReportName(""); setEmails(""); setIntervalValue(1); setIntervalUnit("Day");
+    setReportName(""); setEmails(""); setIntervalValue(1); setIntervalUnit("Day"); setSendAtTime("07:00");
     setSelectedTier(""); setAutoMembers([]); setAutoMembersList([]);
     setReportPeriod("yesterday");
     const d = new Date(); const y = new Date(); y.setDate(y.getDate() - 1);
@@ -2012,7 +2017,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
 
   const loadReport = (r) => {
     setEditId(r.id); setReportName(r.name || ""); setEmails(r.emails || "");
-    setIntervalValue(r.intervalValue || 1); setIntervalUnit(r.intervalUnit || "Day");
+    setIntervalValue(r.intervalValue || 1); setIntervalUnit(r.intervalUnit || "Day"); setSendAtTime(r.sendAtTime || "07:00");
     setSelectedTier(r.selectedTier || ""); setAutoMembers(r.autoMembers || []);
     setReportPeriod(r.reportPeriod || "custom");
     setStartDate(r.startDate || ""); setEndDate(r.endDate || "");
@@ -2025,7 +2030,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
     const config = {
       id: editId || Date.now().toString(),
       name: reportName.trim(), emails: emails.trim(),
-      intervalValue, intervalUnit, cronExpr, cronLabel,
+      intervalValue, intervalUnit, sendAtTime, cronExpr, cronLabel,
       selectedTier, tierLabel, tierNum,
       autoMembers: [...autoMembers], memberNames: [...memberNames],
       reportPeriod, startDate, endDate, fromTime, toTime, daysDiff,
@@ -2134,8 +2139,18 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {savedReports.map(r => {
                 const lastSent = r.lastSentAt ? new Date(r.lastSentAt) : null;
-                const interval = getIntervalMs(r.intervalUnit, r.intervalValue);
-                const nextSend = lastSent ? new Date(lastSent.getTime() + interval) : null;
+                const unit = r.intervalUnit || "Day";
+                const sendAt = r.sendAtTime || "07:00";
+                const [sH, sM] = sendAt.split(":").map(Number);
+                let nextSend = null;
+                if (unit === "Minute" || unit === "Hour") {
+                  const interval = getIntervalMs(unit, r.intervalValue);
+                  nextSend = lastSent ? new Date(lastSent.getTime() + interval) : null;
+                } else if (lastSent) {
+                  const next = new Date(); next.setHours(sH, sM, 0, 0);
+                  if (next <= new Date()) next.setDate(next.getDate() + (unit === "Day" ? (r.intervalValue || 1) : 1));
+                  nextSend = next;
+                }
                 const isActive = !!d365Account;
                 const isSending = sendingId === r.id;
                 const result = sendResult?.id === r.id ? sendResult : null;
@@ -2160,7 +2175,8 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
                   {result && <div style={{ fontSize: 11, padding: "6px 10px", borderRadius: 6, marginBottom: 6, background: result.ok ? "#2D9D7812" : "#f4433612", color: result.ok ? "#2D9D78" : "#d32f2f", fontWeight: 600 }}>{result.ok ? "✅ Sent successfully!" : `❌ ${result.msg}`}</div>}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#1565c015", color: "#1565c0", fontWeight: 600 }}>🏢 {r.tierLabel}</span>
-                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}12`, color: C.accent, fontWeight: 600 }}>🔄 {r.cronLabel}</span>
+                    <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: `${C.accent}12`, color: C.accent, fontWeight: 600 }}>🔄 {r.cronLabel || "Every day"}</span>
+                    {r.sendAtTime && (r.intervalUnit === "Day" || r.intervalUnit === "Month" || r.intervalUnit === "Year") && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#9C27B012", color: "#7b1fa2", fontWeight: 600 }}>🕐 {r.sendAtTime} CT</span>}
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#2D9D7812", color: "#2D9D78", fontWeight: 600 }}>📧 {r.emails.split(",").length} recipient{r.emails.split(",").length !== 1 ? "s" : ""}</span>
                     <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#FF980012", color: "#e65100", fontWeight: 600 }}>📅 {r.reportPeriod === "yesterday" ? "Yesterday" : r.reportPeriod === "last_7" ? "Last 7 Days" : r.reportPeriod === "last_14" ? "Last 14 Days" : r.reportPeriod === "last_30" ? "Last 30 Days" : `${r.daysDiff}d`} ({r.fromTime}–{r.toTime})</span>
                     {r.memberNames && r.memberNames.length > 0 && <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, background: "#7b1fa212", color: "#7b1fa2", fontWeight: 600 }}>👥 {r.memberNames.length} member{r.memberNames.length !== 1 ? "s" : ""}</span>}
@@ -2294,6 +2310,20 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
             <div style={{ fontSize: 10, color: C.textLight, marginTop: 6 }}>Cron: <code style={{ fontFamily: "'Space Mono', monospace", background: C.bg, padding: "2px 6px", borderRadius: 4 }}>{cronExpr}</code></div>
           </div>
 
+          {/* SEND AT TIME */}
+          {(intervalUnit === "Day" || intervalUnit === "Month" || intervalUnit === "Year") && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={labelSt}><span>🕐</span> Send At</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="time" value={sendAtTime} onChange={e => setSendAtTime(e.target.value)} style={{ ...inputSt, width: 160, fontSize: 13, fontFamily: "'Space Mono', monospace", padding: "10px 12px" }} />
+                <span style={{ fontSize: 11, color: C.textLight }}>CT</span>
+              </div>
+              <div style={{ fontSize: 11, color: C.textLight, marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>💡</span> Report will be delivered at {sendAtTime} Central Time each {intervalUnit.toLowerCase()}
+              </div>
+            </div>
+          )}
+
           {/* RECIPIENTS */}
           <div style={{ marginBottom: 16 }}>
             <div style={labelSt}><span>📧</span> Recipient Email(s) *</div>
@@ -2422,11 +2452,35 @@ function Dashboard({ user, onLogout }) {
     const checkAndSend = async () => {
       let reports;
       try { reports = JSON.parse(localStorage.getItem("autoReports") || "[]"); } catch { return; }
-      const now = Date.now();
+      const now = new Date();
       for (const r of reports) {
-        const interval = getIntervalMs(r.intervalUnit, r.intervalValue);
-        const lastSent = r.lastSentAt ? new Date(r.lastSentAt).getTime() : 0;
-        if (now - lastSent >= interval) {
+        const unit = r.intervalUnit || "Day";
+        const sendAt = r.sendAtTime || "07:00";
+        const [sH, sM] = sendAt.split(":").map(Number);
+        let shouldSend = false;
+
+        if (unit === "Minute" || unit === "Hour") {
+          // For sub-day intervals, use the old interval-based logic
+          const interval = getIntervalMs(unit, r.intervalValue);
+          const lastSent = r.lastSentAt ? new Date(r.lastSentAt).getTime() : 0;
+          shouldSend = Date.now() - lastSent >= interval;
+        } else {
+          // For Day/Month/Year: check if current time >= sendAtTime and not already sent in this period
+          const nowH = now.getHours(), nowM = now.getMinutes();
+          const pastSendTime = nowH > sH || (nowH === sH && nowM >= sM);
+          if (pastSendTime) {
+            const lastSent = r.lastSentAt ? new Date(r.lastSentAt) : null;
+            if (!lastSent) {
+              shouldSend = true;
+            } else {
+              // Check if last send was before today's send time
+              const todaySend = new Date(now); todaySend.setHours(sH, sM, 0, 0);
+              shouldSend = lastSent < todaySend;
+            }
+          }
+        }
+
+        if (shouldSend) {
           try {
             await executeAutoReport(r);
             r.lastSentAt = new Date().toISOString();
