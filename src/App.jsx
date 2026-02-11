@@ -2390,6 +2390,47 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
    MAIN DASHBOARD — SIDEBAR LAYOUT
    ═══════════════════════════════════════════════════════ */
 function Dashboard({ user, onLogout }) {
+  // ─── INACTIVITY TIMEOUT ───
+  const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+  const WARN_BEFORE = 2 * 60 * 1000;   // warn 2 minutes before logout
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(0);
+  const lastActivityRef = useRef(Date.now());
+  const idleTimerRef = useRef(null);
+  const countdownRef = useRef(null);
+
+  useEffect(() => {
+    const resetActivity = () => {
+      lastActivityRef.current = Date.now();
+      if (showIdleWarning) { setShowIdleWarning(false); if (countdownRef.current) clearInterval(countdownRef.current); }
+    };
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
+    events.forEach(e => window.addEventListener(e, resetActivity, { passive: true }));
+
+    idleTimerRef.current = setInterval(() => {
+      const idle = Date.now() - lastActivityRef.current;
+      if (idle >= IDLE_TIMEOUT) {
+        clearInterval(idleTimerRef.current);
+        if (countdownRef.current) clearInterval(countdownRef.current);
+        onLogout();
+      } else if (idle >= IDLE_TIMEOUT - WARN_BEFORE && !showIdleWarning) {
+        setShowIdleWarning(true);
+        setIdleCountdown(Math.ceil((IDLE_TIMEOUT - idle) / 1000));
+        countdownRef.current = setInterval(() => {
+          const remaining = Math.ceil((IDLE_TIMEOUT - (Date.now() - lastActivityRef.current)) / 1000);
+          if (remaining <= 0) { clearInterval(countdownRef.current); onLogout(); }
+          else setIdleCountdown(remaining);
+        }, 1000);
+      }
+    }, 10000);
+
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetActivity));
+      if (idleTimerRef.current) clearInterval(idleTimerRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+
   const [queues, setQueues] = useState([]);
   const [selectedQueue, setSelectedQueue] = useState(null);
   const [loadingQueues, setLoadingQueues] = useState(false);
@@ -2836,6 +2877,20 @@ function Dashboard({ user, onLogout }) {
   .conn-bar { flex-wrap: wrap; gap: 6px !important; padding: 6px 16px !important; font-size: 10px !important; }
 }
 `}</style>
+      {/* IDLE TIMEOUT WARNING */}
+      {showIdleWarning && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: C.card, borderRadius: 20, padding: "32px 36px", maxWidth: 420, width: "90%", textAlign: "center", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>⏰</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700, color: C.textDark }}>Session Expiring</h3>
+            <p style={{ fontSize: 14, color: C.textMid, marginBottom: 16 }}>You've been inactive for a while. You'll be logged out in:</p>
+            <div style={{ fontSize: 42, fontWeight: 800, color: idleCountdown <= 30 ? "#E5544B" : C.accent, fontFamily: "'Space Mono', monospace", marginBottom: 8 }}>
+              {Math.floor(idleCountdown / 60)}:{String(idleCountdown % 60).padStart(2, "0")}
+            </div>
+            <p style={{ fontSize: 12, color: C.textLight, margin: 0 }}>Move your mouse or press any key to stay signed in</p>
+          </div>
+        </div>
+      )}
       <SettingsModal show={showSettings} onClose={() => setShowSettings(false)} config={apiConfig} onSave={setApiConfig} d365Account={d365Account} onD365Login={handleD365Login} onD365Logout={handleD365Logout} />
       <SendReportModal show={showSendModal} onClose={() => setShowSendModal(false)} onSend={handleSendReport} dateLabel={dateLabel} />
       <AutoReportModal show={showAutoReport} onClose={() => setShowAutoReport(false)} queues={queues} d365Account={d365Account} autoSendLog={autoSendLog} />
