@@ -2160,9 +2160,9 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
                 } else if (lastSent) {
                   const iv = r.intervalValue || 1;
                   const next = new Date(lastSent);
-                  if (unit === "Day") next.setDate(next.getDate() + iv);
-                  else if (unit === "Month") next.setMonth(next.getMonth() + iv);
-                  else if (unit === "Year") next.setFullYear(next.getFullYear() + iv);
+                  if (unit === "Day") { next.setDate(next.getDate() + iv); }
+                  else if (unit === "Month") { next.setDate(1); next.setMonth(next.getMonth() + iv); }
+                  else if (unit === "Year") { next.setMonth(0); next.setDate(1); next.setFullYear(next.getFullYear() + iv); }
                   next.setHours(sH, sM, 0, 0);
                   nextSend = next;
                 }
@@ -2504,9 +2504,9 @@ function Dashboard({ user, onLogout }) {
             } else {
               const iv = r.intervalValue || 1;
               const nextDue = new Date(lastSent);
-              if (unit === "Day") nextDue.setDate(nextDue.getDate() + iv);
-              else if (unit === "Month") nextDue.setMonth(nextDue.getMonth() + iv);
-              else if (unit === "Year") nextDue.setFullYear(nextDue.getFullYear() + iv);
+              if (unit === "Day") { nextDue.setDate(nextDue.getDate() + iv); }
+              else if (unit === "Month") { nextDue.setDate(1); nextDue.setMonth(nextDue.getMonth() + iv); }
+              else if (unit === "Year") { nextDue.setMonth(0); nextDue.setDate(1); nextDue.setFullYear(nextDue.getFullYear() + iv); }
               nextDue.setHours(sH, sM, 0, 0);
               shouldSend = now >= nextDue;
             }
