@@ -1297,7 +1297,8 @@ async function executeAutoReport(report) {
     }
   }
   const data = await fetchLiveData({}, sd, ed, () => {}, report.fromTime, report.toTime);
-  const dateLabel = `${sd} to ${ed} (${report.fromTime} — ${report.toTime})`;
+  const fmtDate = (d) => { const dt = new Date(d + "T00:00:00"); return dt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }); };
+  const dateLabel = sd === ed ? `${fmtDate(sd)} (${report.fromTime} — ${report.toTime})` : `${fmtDate(sd)} to ${fmtDate(ed)} (${report.fromTime} — ${report.toTime})`;
   const html = buildAutoEmailHTML(data, dateLabel);
   if (!html) throw new Error("No report data generated");
   await sendEmailViaGraph(report.emails, `📊 Auto Report: ${report.name} — ${dateLabel}`, html);
@@ -2147,8 +2148,12 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
                   const interval = getIntervalMs(unit, r.intervalValue);
                   nextSend = lastSent ? new Date(lastSent.getTime() + interval) : null;
                 } else if (lastSent) {
-                  const next = new Date(); next.setHours(sH, sM, 0, 0);
-                  if (next <= new Date()) next.setDate(next.getDate() + (unit === "Day" ? (r.intervalValue || 1) : 1));
+                  const iv = r.intervalValue || 1;
+                  const next = new Date(lastSent);
+                  if (unit === "Day") next.setDate(next.getDate() + iv);
+                  else if (unit === "Month") next.setMonth(next.getMonth() + iv);
+                  else if (unit === "Year") next.setFullYear(next.getFullYear() + iv);
+                  next.setHours(sH, sM, 0, 0);
                   nextSend = next;
                 }
                 const isActive = !!d365Account;
@@ -2465,7 +2470,7 @@ function Dashboard({ user, onLogout }) {
           const lastSent = r.lastSentAt ? new Date(r.lastSentAt).getTime() : 0;
           shouldSend = Date.now() - lastSent >= interval;
         } else {
-          // For Day/Month/Year: check if current time >= sendAtTime and not already sent in this period
+          // For Day/Month/Year: check if current time >= sendAtTime and enough time has passed
           const nowH = now.getHours(), nowM = now.getMinutes();
           const pastSendTime = nowH > sH || (nowH === sH && nowM >= sM);
           if (pastSendTime) {
@@ -2473,9 +2478,13 @@ function Dashboard({ user, onLogout }) {
             if (!lastSent) {
               shouldSend = true;
             } else {
-              // Check if last send was before today's send time
-              const todaySend = new Date(now); todaySend.setHours(sH, sM, 0, 0);
-              shouldSend = lastSent < todaySend;
+              const iv = r.intervalValue || 1;
+              const nextDue = new Date(lastSent);
+              if (unit === "Day") nextDue.setDate(nextDue.getDate() + iv);
+              else if (unit === "Month") nextDue.setMonth(nextDue.getMonth() + iv);
+              else if (unit === "Year") nextDue.setFullYear(nextDue.getFullYear() + iv);
+              nextDue.setHours(sH, sM, 0, 0);
+              shouldSend = now >= nextDue;
             }
           }
         }
