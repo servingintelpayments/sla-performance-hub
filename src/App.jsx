@@ -231,6 +231,13 @@ function checkTarget(metricKey, value) {
 }
 
 /* ─── COLORS ─── */
+// ─── GITHUB AUTO REPORTS CONFIG ───
+const GH_CONFIG = {
+  owner: "servingintelPayments",
+  repo: "service-desk-reports",
+  token: "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",
+};
+
 const C = {
   primary: "#1B2A4A", primaryDark: "#152d4a", accent: "#E8653A", accentLight: "#F09A7A",
   green: "#4CAF50", greenLight: "#e8f5e9", red: "#f44336", redLight: "#ffebee",
@@ -1923,7 +1930,31 @@ function SendReportModal({ show, onClose, onSend, dateLabel }) {
 }
 
 
-const AUTOREPORT_PY_CONTENT = "\"\"\"Auto KPI Report - Queries D365 + Sends styled email via Graph API\"\"\"\nimport os, sys, json\nfrom datetime import datetime, timedelta, timezone\nfrom zoneinfo import ZoneInfo\nimport requests\nfrom msal import ConfidentialClientApplication\n\nD365_TENANT = os.environ[\"D365_TENANT_ID\"]\nD365_CLIENT = os.environ[\"D365_CLIENT_ID\"]\nD365_SECRET = os.environ[\"D365_CLIENT_SECRET\"]\nORG_URL = os.environ[\"D365_ORG_URL\"].rstrip(\"/\")\nGRAPH_TENANT = os.environ.get(\"GRAPH_TENANT_ID\", D365_TENANT)\nGRAPH_CLIENT = os.environ.get(\"GRAPH_CLIENT_ID\", D365_CLIENT)\nGRAPH_SECRET = os.environ.get(\"GRAPH_CLIENT_SECRET\", D365_SECRET)\nSEND_FROM = os.environ[\"SEND_FROM\"]\nSEND_TO = os.environ[\"SEND_TO\"]\nLOOKBACK = int(os.environ.get(\"LOOKBACK_HOURS\", \"24\"))\nTIERS = os.environ.get(\"REPORT_TIERS\", \"ALL\")\nMEMBERS = [m.strip() for m in os.environ.get(\"REPORT_MEMBERS\", \"\").split(\",\") if m.strip()]\nTIME_FROM = os.environ.get(\"TIME_FROM\", \"00:00\")\nTIME_TO = os.environ.get(\"TIME_TO\", \"23:59\")\nAPI_BASE = f\"{ORG_URL}/api/data/v9.2\"\nCT = ZoneInfo(\"America/Chicago\")\n\ndef get_d365_token():\n    app = ConfidentialClientApplication(D365_CLIENT, authority=f\"https://login.microsoftonline.com/{D365_TENANT}\", client_credential=D365_SECRET)\n    r = app.acquire_token_for_client(scopes=[f\"{ORG_URL}/.default\"])\n    if \"access_token\" not in r: print(f\"D365 auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\ndef get_graph_token():\n    app = ConfidentialClientApplication(GRAPH_CLIENT, authority=f\"https://login.microsoftonline.com/{GRAPH_TENANT}\", client_credential=GRAPH_SECRET)\n    r = app.acquire_token_for_client(scopes=[\"https://graph.microsoft.com/.default\"])\n    if \"access_token\" not in r: print(f\"Graph auth failed: {r}\"); sys.exit(1)\n    return r[\"access_token\"]\n\nS = requests.Session()\n\ndef init_d365(token):\n    S.headers.update({\"Authorization\": f\"Bearer {token}\", \"OData-MaxVersion\": \"4.0\", \"OData-Version\": \"4.0\", \"Accept\": \"application/json\", \"Prefer\": \"odata.include-annotations=*,odata.maxpagesize=5000\"})\n\ndef d365_get(q):\n    url = f\"{API_BASE}/{q}\"\n    rows = []\n    while url:\n        r = S.get(url); r.raise_for_status(); d = r.json()\n        rows.extend(d.get(\"value\", [])); url = d.get(\"@odata.nextLink\")\n    return rows\n\ndef d365_count(q):\n    r = S.get(f\"{API_BASE}/{q}\"); r.raise_for_status(); d = r.json()\n    return d.get(\"@odata.count\", len(d.get(\"value\", [])))\n\ndef get_range():\n    now = datetime.now(CT)\n    start = now - timedelta(hours=LOOKBACK)\n    fh, fm2 = map(int, TIME_FROM.split(\":\"))\n    th, tm2 = map(int, TIME_TO.split(\":\"))\n    start = start.replace(hour=fh, minute=fm2, second=0, microsecond=0)\n    end = now.replace(hour=th, minute=tm2, second=59, microsecond=0)\n    s = start.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    e = end.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    label = f\"{start.strftime('%b %d, %I:%M %p')} - {end.strftime('%b %d, %I:%M %p %Z')}\"\n    return s, e, label\n\ndef count_kpi(rows, field):\n    met = missed = 0\n    for r in rows:\n        st = (r.get(field) or {}).get(\"status\")\n        if st == 4: met += 1\n        elif st == 1: missed += 1\n    return met, missed\n\ndef pct(n, d): return round(n/d*100) if d > 0 else \"N/A\"\ndef sla_pct(m, x): t = m+x; return round(m/t*100) if t > 0 else \"N/A\"\ndef ic(v, tgt, inv=False):\n    if v == \"N/A\": return \"\u2796\"\n    return \"\u2705\" if (inv and v < tgt) or (not inv and v >= tgt) else \"\ud83d\udd34\"\ndef fm(v): return f\"{v}%\" if v != \"N/A\" else \"N/A\"\n\ndef fetch_tier(code, df, s, e):\n    base = f\"casetypecode eq {code} and {df} ge {s} and {df} le {e}\"\n    total = d365_count(f\"incidents?$filter={base}&$count=true&$top=1\")\n    resolved = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    resp = d365_get(f\"incidents?$filter={base} and statecode eq 1&$select=incidentid&$expand=firstresponsebykpiid($select=status)\")\n    active = d365_get(f\"incidents?$filter={base} and statecode eq 0&$select=incidentid&$expand=resolvebykpiid($select=status)\")\n    sm, sx = count_kpi(resolved, \"resolvebykpiid\")\n    rm, rx = count_kpi(resp, \"firstresponsebykpiid\")\n    breached = sum(1 for r in active if (r.get(\"resolvebykpiid\") or {}).get(\"status\") == 1)\n    return {\"total\": total, \"resolved\": len(resolved), \"sla_met\": sm, \"sla_missed\": sx, \"sla\": sla_pct(sm, sx),\n            \"resp_met\": rm, \"resp_missed\": rx, \"resp_sla\": sla_pct(rm, rx),\n            \"breach\": breached, \"breach_total\": len(active), \"breach_rate\": pct(breached, len(active)) if len(active) > 0 else 0}\n\ndef row(label, val, indent=False):\n    pad = \"padding-left:14px;font-size:12px;\" if indent else \"\"\n    return f'<tr><td style=\"padding:6px 0;color:#555;{pad}\">{label}</td><td style=\"padding:6px 0;text-align:right;font-weight:700;\">{val}</td></tr>'\n\ndef build_html(tiers_data, ph, em, cs, label, config_label):\n    colors = {1: (\"#1565c0\",\"#2196F3\"), 2: (\"#e65100\",\"#FF9800\"), 3: (\"#7b1fa2\",\"#9C27B0\")}\n    tier_html = \"\"\n    for td in tiers_data:\n        c1, c2 = colors.get(td[\"code\"], (\"#333\",\"#666\"))\n        t = td[\"data\"]\n        tier_html += f'''<div style=\"background:linear-gradient(135deg,{c1},{c2});color:#fff;padding:14px 20px;border-radius:10px 10px 0 0;\"><strong>{td[\"name\"]}</strong></div>\n<div style=\"background:#fff;padding:16px 20px;border-radius:0 0 10px 10px;margin-bottom:16px;\"><table style=\"width:100%;border-collapse:collapse;font-size:13px;\">\n{row(\"SLA Compliance\", f\"{fm(t['sla'])} {ic(t['sla'],90)}\")}\n{row(f\"  {t['sla_met']} met / {t['sla_missed']} missed\", \"\", True)}\n{row(\"Response SLA\", f\"{fm(t['resp_sla'])} {ic(t['resp_sla'],90)}\")}\n{row(\"Open Breach\", f\"{t['breach_rate']}% {ic(t['breach_rate'],5,True)} ({t['breach']}/{t['breach_total']})\")}\n{row(\"FCR\", f\"{fm(t.get('fcr_rate','N/A'))} {ic(t.get('fcr_rate','N/A'),90)}\")}\n{row(\"Escalation\", f\"{fm(t.get('esc_rate','N/A'))} {ic(t.get('esc_rate','N/A'),10,True)}\")}\n{row(\"Total\", t[\"total\"])}{row(\"Resolved\", t[\"resolved\"])}\n</table></div>'''\n    tc = sum(t[\"data\"][\"total\"] for t in tiers_data)\n    tr = sum(t[\"data\"][\"resolved\"] for t in tiers_data)\n    return f'''<div style=\"font-family:Segoe UI,Arial,sans-serif;max-width:700px;margin:0 auto;background:#f4f0eb;padding:20px;\">\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:24px 28px;border-radius:12px;text-align:center;margin-bottom:16px;\">\n<h1 style=\"margin:0;font-size:20px;\">Auto Report</h1>\n<p style=\"margin:4px 0 0;font-size:13px;opacity:0.85;\">{label}</p>\n<p style=\"margin:2px 0 0;font-size:10px;opacity:0.6;\">{config_label}</p></div>\n{tier_html}\n<table style=\"width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;\"><tr>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2D9D78;\">Phone</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",ph[\"total\"])}{row(\"Answered\",ph[\"answered\"])}{row(\"Abandoned\",ph[\"abandoned\"])}{row(\"Rate\",f\"{fm(ph['rate'])} {ic(ph['rate'],95)}\")}</table></td>\n<td style=\"width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;\"><strong style=\"color:#2196F3;\">Email</strong><table style=\"width:100%;font-size:12px;margin-top:8px;\">{row(\"Total\",em[\"total\"])}{row(\"Responded\",em[\"responded\"])}{row(\"Resolved\",em[\"resolved\"])}</table></td>\n</tr></table>\n<div style=\"background:linear-gradient(135deg,#1a2332,#2d4a6f);color:#fff;padding:20px 24px;border-radius:12px;text-align:center;\">\n<strong>OVERALL</strong><table style=\"width:100%;margin-top:12px;\"><tr>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#4FC3F7;\">{tc}</div><div style=\"font-size:10px;color:#a8c6df;\">Created</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{tr}</div><div style=\"font-size:10px;color:#a8c6df;\">Resolved</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#81C784;\">{ph[\"answered\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Answered</div></td>\n<td style=\"text-align:center\"><div style=\"font-size:24px;font-weight:700;color:#f44336;\">{ph[\"abandoned\"]}</div><div style=\"font-size:10px;color:#a8c6df;\">Abandoned</div></td>\n</tr></table></div>\n<p style=\"text-align:center;font-size:10px;color:#999;margin-top:16px;\">Auto-generated from Dynamics 365</p></div>'''\n\ndef send_email(html, label):\n    token = get_graph_token()\n    recipients = [{\"emailAddress\": {\"address\": e.strip()}} for e in SEND_TO.split(\",\") if e.strip()]\n    payload = {\"message\": {\"subject\": f\"Auto Report - {label}\", \"body\": {\"contentType\": \"HTML\", \"content\": html}, \"toRecipients\": recipients, \"from\": {\"emailAddress\": {\"address\": SEND_FROM}}}}\n    r = requests.post(f\"https://graph.microsoft.com/v1.0/users/{SEND_FROM}/sendMail\", headers={\"Authorization\": f\"Bearer {token}\", \"Content-Type\": \"application/json\"}, json=payload)\n    if r.status_code not in (200, 202): print(f\"Email failed ({r.status_code}): {r.text[:300]}\"); sys.exit(1)\n    print(f\"Email sent to {SEND_TO}\")\n\ndef main():\n    print(\"Authenticating D365...\")\n    init_d365(get_d365_token())\n    s, e, label = get_range()\n    print(f\"Report: {label}\")\n    tier_configs = [\n        {\"code\": 1, \"df\": \"createdon\", \"name\": \"Tier 1 - Service Desk\"},\n        {\"code\": 2, \"df\": \"escalatedon\", \"name\": \"Tier 2 - Programming\"},\n        {\"code\": 3, \"df\": \"escalatedon\", \"name\": \"Tier 3 - Relationship Mgrs\"},\n    ]\n    if TIERS != \"ALL\":\n        tier_codes = [int(t.strip()) for t in TIERS.split(\",\")]\n        tier_configs = [tc for tc in tier_configs if tc[\"code\"] in tier_codes]\n    tiers_data = []\n    for tc in tier_configs:\n        print(f\"Querying {tc['name']}...\")\n        t = fetch_tier(tc[\"code\"], tc[\"df\"], s, e)\n        if tc[\"code\"] == 1:\n            fcr = d365_count(f\"incidents?$filter=casetypecode eq 1 and cr7fe_new_fcr eq true and createdon ge {s} and createdon le {e}&$count=true&$top=1\")\n            esc = d365_count(f\"incidents?$filter=casetypecode eq 2 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"fcr_rate\"] = pct(fcr, t[\"total\"]); t[\"esc_rate\"] = pct(esc, t[\"total\"])\n        elif tc[\"code\"] == 2:\n            t2e = d365_count(f\"incidents?$filter=casetypecode eq 3 and escalatedon ge {s} and escalatedon le {e}&$count=true&$top=1\")\n            t[\"esc_rate\"] = pct(t2e, t[\"total\"])\n        tiers_data.append({**tc, \"data\": t})\n    print(\"Phone...\")\n    try:\n        pb = f\"createdon ge {s} and createdon le {e} and directioncode eq true\"\n        pt = d365_count(f\"phonecalls?$filter={pb}&$count=true&$top=1\")\n        pa = d365_count(f\"phonecalls?$filter={pb} and statecode eq 1&$count=true&$top=1\")\n        ph = {\"total\": pt, \"answered\": pa, \"abandoned\": pt-pa, \"rate\": pct(pa, pt)}\n    except: ph = {\"total\":0,\"answered\":0,\"abandoned\":0,\"rate\":\"N/A\"}\n    print(\"Email...\")\n    eb = f\"caseorigincode eq 2 and createdon ge {s} and createdon le {e}\"\n    em = {\"total\": d365_count(f\"incidents?$filter={eb}&$count=true&$top=1\"),\n          \"responded\": d365_count(f\"incidents?$filter={eb} and firstresponsesent eq true&$count=true&$top=1\"),\n          \"resolved\": d365_count(f\"incidents?$filter={eb} and statecode eq 1&$count=true&$top=1\")}\n    print(\"CSAT...\")\n    try:\n        cr = d365_get(f\"cr7fe_new_csats?$filter=createdon ge {s} and createdon le {e}&$select=cr7fe_new_rating\")\n        sc = [r[\"cr7fe_new_rating\"] for r in cr if r.get(\"cr7fe_new_rating\") is not None]\n        cs = {\"count\": len(sc), \"avg\": round(sum(sc)/len(sc),1) if sc else \"N/A\"}\n    except: cs = {\"count\":0,\"avg\":\"N/A\"}\n    tier_label = \"All Tiers\" if TIERS == \"ALL\" else \", \".join(tc[\"name\"] for tc in tiers_data)\n    member_label = f\"{len(MEMBERS)} members\" if MEMBERS else \"\"\n    config_label = tier_label + (\" | \" + member_label if member_label else \"\")\n    html = build_html(tiers_data, ph, em, cs, label, config_label)\n    print(\"Sending email...\"); send_email(html, label)\n    print(\"Done!\")\n\nif __name__ == \"__main__\": main()\n";
+// ─── GITHUB SYNC — Push reports.json to GitHub repo ───
+async function syncReportsToGitHub(reports) {
+  const { owner, repo, token } = GH_CONFIG;
+  if (!token || !owner || !repo) return { ok: false, msg: "GitHub not configured — update GH_CONFIG in App.jsx" };
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/reports.json`;
+  const headers = { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" };
+  try {
+    // Get current file SHA (needed for update)
+    let sha = null;
+    try {
+      const existing = await fetch(url, { headers });
+      if (existing.ok) { const d = await existing.json(); sha = d.sha; }
+    } catch {}
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(reports, null, 2))));
+    const body = { message: `Update auto reports (${reports.length} report${reports.length !== 1 ? "s" : ""})`, content };
+    if (sha) body.sha = sha;
+    const resp = await fetch(url, { method: "PUT", headers, body: JSON.stringify(body) });
+    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.message || `HTTP ${resp.status}`); }
+    console.log("[GitHub] ✅ reports.json synced");
+    return { ok: true };
+  } catch (err) {
+    console.error("[GitHub] Sync failed:", err);
+    return { ok: false, msg: err.message };
+  }
+}
 
 function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
   const [view, setView] = useState("list"); // "list" or "edit"
@@ -1979,7 +2010,16 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
     } else { setAutoMembersList([]); setAutoMembers([]); }
   }, [selectedTier, d365Account]);
 
-  const persist = (reports) => { setSavedReports(reports); localStorage.setItem("autoReports", JSON.stringify(reports)); };
+  const [ghSyncStatus, setGhSyncStatus] = useState(null);
+  const persist = async (reports) => {
+    setSavedReports(reports);
+    localStorage.setItem("autoReports", JSON.stringify(reports));
+    // Sync to GitHub for server-side scheduling
+    setGhSyncStatus({ syncing: true });
+    const result = await syncReportsToGitHub(reports);
+    setGhSyncStatus(result.ok ? { ok: true } : { ok: false, msg: result.msg });
+    setTimeout(() => setGhSyncStatus(null), 4000);
+  };
 
   if (!show) return null;
 
@@ -2057,70 +2097,6 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
     setConfirmDelete(null);
   };
 
-  const handleDownload = (report) => {
-    const tc = report.selectedTier === "all" ? "ALL" : String(report.tierNum || 1);
-    const period = report.reportPeriod || "custom";
-    const lh = period === "yesterday" ? 24 : period === "last_week" ? 168 : period === "last_month" ? 744 : period === "last_7" ? 168 : period === "last_14" ? 336 : period === "last_30" ? 720 : report.daysDiff * 24;
-    const mids = (report.autoMembers || []).join(",");
-    const yamlLines = [
-      "name: Auto KPI Report - " + report.name, "on:", "  schedule:",
-      "    - cron: '" + report.cronExpr + "'", "  workflow_dispatch:", "",
-      "jobs:", "  send-report:", "    runs-on: ubuntu-latest", "    steps:",
-      "      - uses: actions/checkout@v4", "      - uses: actions/setup-python@v5",
-      "        with:", "          python-version: '3.11'", "      - run: pip install requests msal",
-      "      - name: Generate and send report", "        env:",
-      "          D365_TENANT_ID: ${{secrets.D365_TENANT_ID}}",
-      "          D365_CLIENT_ID: ${{secrets.D365_CLIENT_ID}}",
-      "          D365_CLIENT_SECRET: ${{secrets.D365_CLIENT_SECRET}}",
-      "          D365_ORG_URL: ${{secrets.D365_ORG_URL}}",
-      "          GRAPH_TENANT_ID: ${{secrets.GRAPH_TENANT_ID}}",
-      "          GRAPH_CLIENT_ID: ${{secrets.GRAPH_CLIENT_ID}}",
-      "          GRAPH_CLIENT_SECRET: ${{secrets.GRAPH_CLIENT_SECRET}}",
-      "          SEND_FROM: ${{secrets.SEND_FROM}}",
-      '          SEND_TO: "' + report.emails + '"',
-      '          LOOKBACK_HOURS: "' + lh + '"',
-      '          REPORT_TIERS: "' + tc + '"',
-      '          REPORT_MEMBERS: "' + mids + '"',
-      '          TIME_FROM: "' + report.fromTime + '"',
-      '          TIME_TO: "' + report.toTime + '"',
-      "        run: python auto_report.py",
-    ];
-    const readme = [
-      "# Auto KPI Report: " + report.name, "",
-      "## Configuration",
-      "- Tier: " + report.tierLabel,
-      "- Members: " + (report.memberNames.length > 0 ? report.memberNames.join(", ") : "All"),
-      "- Schedule: " + report.cronLabel,
-      "- Period: " + (period === "yesterday" ? "Yesterday" : period === "last_week" ? "Last Week (Mon–Sun)" : period === "last_month" ? "Last Month" : period === "last_7" ? "Last 7 Days" : period === "last_14" ? "Last 14 Days" : period === "last_30" ? "Last 30 Days" : report.daysDiff + " day(s) custom"),
-      "- Time: " + report.fromTime + " - " + report.toTime,
-      "- Recipients: " + report.emails, "",
-      "## Setup", "",
-      "### 1. Azure App Registration",
-      "Add **Microsoft Graph > Application > Mail.Send** + Grant admin consent", "",
-      "### 2. GitHub Secrets",
-      "| Secret | Value |", "|--------|-------|",
-      "| D365_TENANT_ID | 1b0086bd-aeda-4c74-a15a-23adfe4d0693 |",
-      "| D365_CLIENT_ID | 0918449d-b73e-428a-8238-61723f2a2e7d |",
-      "| D365_CLIENT_SECRET | Your app client secret |",
-      "| D365_ORG_URL | https://servingintel.crm.dynamics.com |",
-      "| GRAPH_TENANT_ID | (same) |", "| GRAPH_CLIENT_ID | (same) |",
-      "| GRAPH_CLIENT_SECRET | (same) |", "| SEND_FROM | your-email@servingintel.com |", "",
-      "### 3. Push and Run",
-      'git add . && git commit -m "auto report" && git push',
-    ];
-    [
-      { name: "auto-report-" + report.name.toLowerCase().replace(/\s+/g, "-") + ".yml", content: yamlLines.join("\n") },
-      { name: "auto_report.py", content: AUTOREPORT_PY_CONTENT },
-      { name: "README.md", content: readme.join("\n") },
-    ].forEach((f, i) => {
-      setTimeout(() => {
-        const blob = new Blob([f.content], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a"); a.href = url; a.download = f.name; a.click();
-        URL.revokeObjectURL(url);
-      }, i * 500);
-    });
-  };
 
   const inputSt = { width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" };
   const labelSt = { fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 };
@@ -2133,7 +2109,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
         <div style={{ padding: "24px 28px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>⏰ Auto Reports</h2>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>{savedReports.length} saved report{savedReports.length !== 1 ? "s" : ""}</p>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>{savedReports.length} saved report{savedReports.length !== 1 ? "s" : ""}{GH_CONFIG.token ? " · GitHub synced" : ""}</p>
           </div>
           <button onClick={() => { resetForm(); setView("edit"); }} style={{ padding: "8px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${C.accent}, ${C.yellow})`, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 16 }}>+</span> New Report
@@ -2178,8 +2154,8 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
                         <span style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>{r.name || "Untitled Report"}</span>
                       </div>
                       {lastSent && <div style={{ fontSize: 10, color: r.lastStatus === "error" ? "#d32f2f" : "#2D9D78", marginLeft: 16 }}>{r.lastStatus === "error" ? `❌ Failed: ${r.lastError || "unknown"}` : `✅ Last sent ${lastSent.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</div>}
-                      {!lastSent && isActive && <div style={{ fontSize: 10, color: C.accent, marginLeft: 16 }}>⏳ Will send shortly...</div>}
-                      {!isActive && <div style={{ fontSize: 10, color: "#999", marginLeft: 16 }}>⚠️ Sign in to D365 to activate</div>}
+                      {!lastSent && isActive && <div style={{ fontSize: 10, color: "#2D9D78", marginLeft: 16 }}>✅ Synced to GitHub — runs automatically</div>}
+                      {!isActive && <div style={{ fontSize: 10, color: "#999", marginLeft: 16 }}>⚠️ Sign in to D365 to send manually</div>}
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button onClick={() => handleSendNow(r)} disabled={!isActive || isSending} title="Send now" style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${isActive ? "#2D9D7840" : C.border}`, background: isActive ? "#2D9D7808" : C.bg, cursor: isActive ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, opacity: isSending ? 0.5 : 1 }}>{isSending ? "⏳" : "▶️"}</button>
@@ -2212,12 +2188,24 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
             </div>
           )}
         </div>
-        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 10, color: d365Account ? "#2D9D78" : "#999", display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: d365Account ? "#2D9D78" : "#ccc" }} />
-            {d365Account ? "Auto-send active · checking every 60s" : "Sign in to D365 to enable auto-send"}
+        {ghSyncStatus && (
+          <div style={{ padding: "0 28px 8px" }}>
+            <div style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: ghSyncStatus.syncing ? "#1565c010" : ghSyncStatus.ok ? "#2D9D7812" : "#f4433612", color: ghSyncStatus.syncing ? "#1565c0" : ghSyncStatus.ok ? "#2D9D78" : "#d32f2f" }}>
+              {ghSyncStatus.syncing ? "⏳ Syncing to GitHub..." : ghSyncStatus.ok ? "✅ Synced to GitHub — reports will run automatically" : `⚠️ GitHub sync failed: ${ghSyncStatus.msg}`}
+            </div>
           </div>
-          <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
+        )}
+        <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}` }}>
+          <div style={{ background: "#1565c008", border: "1px solid #1565c020", borderRadius: 10, padding: "12px 16px", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#1565c0", marginBottom: 4 }}>🚀 How Auto Reports Work</div>
+            <div style={{ fontSize: 11, color: C.textMid, lineHeight: 1.6 }}>
+              Reports are <strong>automatically synced to GitHub</strong> when you save. GitHub Actions runs them on schedule — no browser needed, even if your computer is off.<br/>
+              <strong>▶️ Send Now</strong> — Manual one-time send while logged in.
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Close</button>
+          </div>
         </div>
       </div>
     </div>
@@ -2233,7 +2221,7 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
           <button onClick={() => { setView("list"); resetForm(); }} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>←</button>
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.textDark }}>{editId ? "✏️ Edit Report" : "➕ New Auto Report"}</h2>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Configure scheduled report via GitHub Actions</p>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: C.textMid }}>Reports run automatically via GitHub Actions — no browser needed</p>
           </div>
         </div>
         <div style={{ padding: "20px 28px" }}>
@@ -2390,11 +2378,12 @@ function AutoReportModal({ show, onClose, queues, d365Account, autoSendLog }) {
    MAIN DASHBOARD — SIDEBAR LAYOUT
    ═══════════════════════════════════════════════════════ */
 function Dashboard({ user, onLogout }) {
-  // ─── INACTIVITY TIMEOUT ───
+  // ─── INACTIVITY LOCK SCREEN ───
   const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-  const WARN_BEFORE = 2 * 60 * 1000;   // warn 2 minutes before logout
+  const WARN_BEFORE = 2 * 60 * 1000;   // warn 2 minutes before lock
   const [showIdleWarning, setShowIdleWarning] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
   const lastActivityRef = useRef(Date.now());
   const idleTimerRef = useRef(null);
   const countdownRef = useRef(null);
@@ -2403,22 +2392,23 @@ function Dashboard({ user, onLogout }) {
     const resetActivity = () => {
       lastActivityRef.current = Date.now();
       if (showIdleWarning) { setShowIdleWarning(false); if (countdownRef.current) clearInterval(countdownRef.current); }
+      if (isLocked) setIsLocked(false);
     };
     const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
     events.forEach(e => window.addEventListener(e, resetActivity, { passive: true }));
 
     idleTimerRef.current = setInterval(() => {
       const idle = Date.now() - lastActivityRef.current;
-      if (idle >= IDLE_TIMEOUT) {
-        clearInterval(idleTimerRef.current);
+      if (idle >= IDLE_TIMEOUT && !isLocked) {
         if (countdownRef.current) clearInterval(countdownRef.current);
-        onLogout();
-      } else if (idle >= IDLE_TIMEOUT - WARN_BEFORE && !showIdleWarning) {
+        setShowIdleWarning(false);
+        setIsLocked(true);
+      } else if (idle >= IDLE_TIMEOUT - WARN_BEFORE && !showIdleWarning && !isLocked) {
         setShowIdleWarning(true);
         setIdleCountdown(Math.ceil((IDLE_TIMEOUT - idle) / 1000));
         countdownRef.current = setInterval(() => {
           const remaining = Math.ceil((IDLE_TIMEOUT - (Date.now() - lastActivityRef.current)) / 1000);
-          if (remaining <= 0) { clearInterval(countdownRef.current); onLogout(); }
+          if (remaining <= 0) { clearInterval(countdownRef.current); setShowIdleWarning(false); setIsLocked(true); }
           else setIdleCountdown(remaining);
         }, 1000);
       }
@@ -2429,7 +2419,7 @@ function Dashboard({ user, onLogout }) {
       if (idleTimerRef.current) clearInterval(idleTimerRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, []);
+  }, [isLocked]);
 
   const [queues, setQueues] = useState([]);
   const [selectedQueue, setSelectedQueue] = useState(null);
@@ -2883,11 +2873,28 @@ function Dashboard({ user, onLogout }) {
           <div style={{ background: C.card, borderRadius: 20, padding: "32px 36px", maxWidth: 420, width: "90%", textAlign: "center", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>⏰</div>
             <h3 style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700, color: C.textDark }}>Session Expiring</h3>
-            <p style={{ fontSize: 14, color: C.textMid, marginBottom: 16 }}>You've been inactive for a while. You'll be logged out in:</p>
+            <p style={{ fontSize: 14, color: C.textMid, marginBottom: 16 }}>You've been inactive for a while. Screen will lock in:</p>
             <div style={{ fontSize: 42, fontWeight: 800, color: idleCountdown <= 30 ? "#E5544B" : C.accent, fontFamily: "'Space Mono', monospace", marginBottom: 8 }}>
               {Math.floor(idleCountdown / 60)}:{String(idleCountdown % 60).padStart(2, "0")}
             </div>
             <p style={{ fontSize: 12, color: C.textLight, margin: 0 }}>Move your mouse or press any key to stay signed in</p>
+          </div>
+        </div>
+      )}
+      {/* LOCK SCREEN — Dashboard stays mounted behind this, auto-send keeps running */}
+      {isLocked && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "linear-gradient(135deg, #1a2332, #2d4a6f)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <div style={{ textAlign: "center", color: "#fff" }}>
+            <div style={{ width: 80, height: 80, borderRadius: 24, margin: "0 auto 24px", background: `linear-gradient(135deg, ${C.accent}, ${C.gold})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>🔒</div>
+            <h2 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 700 }}>Screen Locked</h2>
+            <p style={{ fontSize: 14, opacity: 0.7, marginBottom: 24 }}>Inactive for 30 minutes</p>
+            <div style={{ padding: "12px 28px", borderRadius: 12, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", display: "inline-block" }}>
+              <p style={{ fontSize: 13, opacity: 0.9, margin: 0 }}>Move your mouse or press any key to unlock</p>
+            </div>
+            <div style={{ marginTop: 32 }}>
+              <button onClick={onLogout} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 20px", fontSize: 12, color: "rgba(255,255,255,0.5)", cursor: "pointer" }}>Sign out</button>
+            </div>
+            <p style={{ fontSize: 10, opacity: 0.3, marginTop: 24 }}>Auto reports continue running in the background</p>
           </div>
         </div>
       )}
