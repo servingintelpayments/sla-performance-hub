@@ -235,7 +235,7 @@ function checkTarget(metricKey, value) {
 const GH_CONFIG = {
   owner: "servingintelPayments",
   repo: "service-desk-reports",
-  token: "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",
+  token: "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",
 };
 
 const C = {
