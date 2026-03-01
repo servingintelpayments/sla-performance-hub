@@ -5,7 +5,6 @@ import {
   AreaChart, Area
 } from "recharts";
 import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
-import DrillDownView from "./DrillDownView";
 
 /* ═══════════════════════════════════════════════════════════════════
    SERVICE AND OPERATIONS DASHBOARD v7
@@ -2428,6 +2427,7 @@ function Dashboard({ user, onLogout }) {
   const [teamMembers, setTeamMembers] = useState(DEMO_TEAM_MEMBERS);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState([]);
+  const [selectedMetric, setSelectedMetric] = useState("all");
   const [reportType, setReportType] = useState("daily");
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
@@ -2567,7 +2567,6 @@ function Dashboard({ user, onLogout }) {
   }, [d365Account]);
 
   const [memberData, setMemberData] = useState([]);
-  const [viewMode, setViewMode] = useState("report");
 
   const handleRun = async () => {
     setIsRunning(true); setRunProgress(""); setLiveErrors([]); setMemberData([]);
@@ -2942,6 +2941,18 @@ function Dashboard({ user, onLogout }) {
             </div>}
           </div>
           <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><span>📊</span> Metrics Report</div>
+            <select value={selectedMetric} onChange={(e) => setSelectedMetric(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", cursor: "pointer", appearance: "auto" }}>
+              <option value="all">All Metrics</option>
+              <option value="sla">SLA Compliance</option>
+              <option value="fcr">First Contact Resolution</option>
+              <option value="cases">Cases Created / Resolved</option>
+              <option value="response">Avg Response Time</option>
+              <option value="csat">CSAT Score</option>
+              <option value="phone">Phone Metrics</option>
+            </select>
+          </div>
+          <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><span>📅</span> Date Range</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <label><div style={{ fontSize: 10, color: C.textLight, marginBottom: 3, fontWeight: 500 }}>From</div><input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReportType("custom"); }} style={{ width: "100%", padding: "8px 8px", borderRadius: 8, border: `1.5px solid ${C.border}`, fontSize: 11, fontFamily: "'Space Mono', monospace", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} /></label>
@@ -2955,19 +2966,6 @@ function Dashboard({ user, onLogout }) {
               {[{ l: "7D", s: 7 }, { l: "14D", s: 14 }, { l: "30D", s: 30 }, { l: "90D", s: 90 }, { l: "YTD", s: -1 }].map((q) => <button key={q.l} onClick={() => { const e = new Date(), sD = new Date(); if (q.s === -1) { sD.setMonth(0); sD.setDate(1); } else { sD.setDate(sD.getDate() - q.s); } setStartDate(sD.toISOString().split("T")[0]); setEndDate(e.toISOString().split("T")[0]); setStartTime("00:00"); setEndTime("23:59"); setReportType("custom"); }} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 10, fontWeight: 600, color: C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>)}
             </div>
           </div>
-          {/* VIEW MODE TOGGLE */}
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>View Mode</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => setViewMode("report")} style={{ flex: 1, padding: "10px 8px", borderRadius: 10, border: `1.5px solid ${viewMode === "report" ? C.accent : C.border}`, background: viewMode === "report" ? `${C.accent}12` : "transparent", color: viewMode === "report" ? C.accent : C.textMid, fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "'DM Sans', sans-serif" }}>
-                <span>📊</span> Report
-              </button>
-              <button onClick={() => setViewMode("drilldown")} style={{ flex: 1, padding: "10px 8px", borderRadius: 10, border: `1.5px solid ${viewMode === "drilldown" ? "#3B82F6" : C.border}`, background: viewMode === "drilldown" ? "rgba(59,130,246,0.08)" : "transparent", color: viewMode === "drilldown" ? "#3B82F6" : C.textMid, fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "'DM Sans', sans-serif" }}>
-                <span>🔍</span> Drill Down
-              </button>
-            </div>
-          </div>
-
           {/* 8x8 Agent Status Monitor */}
           <AgentMonitor teamMembers={teamMembers} />
           <div style={{ flex: 1 }} />
@@ -2979,10 +2977,8 @@ function Dashboard({ user, onLogout }) {
           {hasRun && <button onClick={() => setShowSendModal(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid ${d365Account ? "#0078D4" : C.border}`, background: d365Account ? "#0078D410" : C.card, color: d365Account ? "#0078D4" : C.textLight, fontSize: 13, fontWeight: 600, cursor: d365Account ? "pointer" : "not-allowed", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span>📤</span> Send Report{!d365Account && <span style={{ fontSize: 9, opacity: 0.7 }}>(sign in first)</span>}</button>}
           <button onClick={() => setShowAutoReport(true)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `1.5px solid #FF980060`, background: "#FF980008", color: "#e65100", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, position: "relative" }}><span>⏰</span> Auto Reports{(() => { try { const c = JSON.parse(localStorage.getItem("autoReports") || "[]").length; return c > 0 ? <span style={{ background: C.accent, color: "#fff", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 10, marginLeft: 4 }}>{c}</span> : null; } catch { return null; } })()}</button>
         </div>
-        <div className="dash-main" style={{ flex: 1, padding: viewMode === "drilldown" ? "0" : "32px 40px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
-          {viewMode === "drilldown" ? (
-            <DrillDownView onBack={() => setViewMode("report")} />
-          ) : !hasRun ? (
+        <div className="dash-main" style={{ flex: 1, padding: "32px 40px", overflow: "auto", minHeight: "calc(100vh - 110px)" }}>
+          {!hasRun ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", textAlign: "center" }}>
               <div style={{ width: 100, height: 100, borderRadius: 24, background: `linear-gradient(135deg, ${C.accent}15, ${C.yellow}15)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>📊</div>
               <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: C.textDark, fontFamily: "'Playfair Display', serif" }}>Service and Operations Dashboard</h2>
