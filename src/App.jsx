@@ -594,7 +594,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   try {
     progress("Case details...");
     const caseData = await d365Fetch(
-      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,ticketnumber,prioritycode,statecode,statuscode,createdon,modifiedon,cr7fe_new_fcr,isescalated,cr7fe_new_csatresponsereceived,cr7fe_new_csatscore,caseorigincode&$expand=resolvebykpiid($select=status),firstresponsebykpiid($select=status)&$orderby=createdon desc&$top=200`
+      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,ticketnumber,prioritycode,statecode,statuscode,createdon,modifiedon,cr7fe_new_fcr,isescalated,cr7fe_new_csatresponsereceived,cr7fe_new_csatscore,caseorigincode&$expand=resolvebykpiid($select=status),firstresponsebykpiid($select=status)&$orderby=createdon desc&$top=5000`
     );
     caseList = (caseData.value || []).map(c => ({
       id: c.incidentid,
@@ -1170,7 +1170,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     try {
       progress(`Fetching Tier ${tierCode} case details...`);
       const caseData = await d365Fetch(
-        `incidents?$filter=casetypecode eq ${tierCode} and ${dateField} ge ${s}T${sT} and ${dateField} le ${e}T${eT}&$select=incidentid,title,ticketnumber,prioritycode,statecode,statuscode,createdon,modifiedon,cr7fe_new_fcr,isescalated,cr7fe_new_csatresponsereceived,cr7fe_new_csatscore,caseorigincode&$expand=resolvebykpiid($select=status),firstresponsebykpiid($select=status)&$orderby=createdon desc&$top=500`
+        `incidents?$filter=casetypecode eq ${tierCode} and ${dateField} ge ${s}T${sT} and ${dateField} le ${e}T${eT}&$select=incidentid,title,ticketnumber,prioritycode,statecode,statuscode,createdon,modifiedon,cr7fe_new_fcr,isescalated,cr7fe_new_csatresponsereceived,cr7fe_new_csatscore,caseorigincode&$expand=resolvebykpiid($select=status),firstresponsebykpiid($select=status)&$orderby=createdon desc&$top=5000`
       );
       return (caseData.value || []).map(c => ({
         id: c.incidentid,
@@ -1566,7 +1566,13 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
         {metrics.map((m, i) => (<MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />))}
       </div>
       </>}
-      {showCaseList && <CaseListTable cases={d.caseList} metricFilter={metricFilter} />}
+      {showCaseList && <CaseListTable cases={d.caseList} metricFilter={metricFilter} stats={{
+        total: d.total, slaMet, slaMissed, slaRate,
+        responseMet: d.slaResponseMet, responseMissed: d.slaResponseMissed, responseRate: d.slaResponseCompliance,
+        fcrRate: d.fcrRate, fcrCases: d.total && d.fcrRate ? Math.round(d.total * d.fcrRate / 100) : 0,
+        activeCases: d.total - (d.resolved || 0), resolvedCases: d.resolved || 0,
+        csatAvg: tier === 1 && data.csat ? data.csat.avgScore : "N/A", csatResponses: tier === 1 && data.csat ? data.csat.responses : 0,
+      }} />}
       {showPhone && (() => {
         const totalCalls = data.phone.totalCalls ?? 0;
         const answered = data.phone.answered ?? 0;
@@ -1658,20 +1664,14 @@ function Definitions() {
   );
 }
 
-function CaseListTable({ cases, metricFilter }) {
+function CaseListTable({ cases, metricFilter, stats = {} }) {
   if (!cases || cases.length === 0) return null;
 
-  let heading = "All Cases";
-  if (metricFilter === "sla") heading = "SLA Compliance — All Cases";
-  else if (metricFilter === "fcr") heading = "First Contact Resolution — All Cases";
-  else if (metricFilter === "cases") heading = "Cases Created / Resolved";
-  else if (metricFilter === "response") heading = "Response SLA — All Cases";
-  else if (metricFilter === "csat") heading = "CSAT Score — All Cases";
+  const headings = { sla: "SLA Compliance", fcr: "First Contact Resolution", cases: "Cases Created / Resolved", response: "Response SLA", csat: "CSAT Score" };
+  const heading = headings[metricFilter] || "All Cases";
 
   const priLabel = (p) => p === 1 ? "High" : p === 2 ? "Normal" : p === 3 ? "Low" : "—";
   const priColor = (p) => p === 1 ? C.red : p === 2 ? C.blue : p === 3 ? C.green : C.gray;
-  const stateLabel = (s) => s === 0 ? "Active" : s === 1 ? "Resolved" : s === 2 ? "Cancelled" : "—";
-  const stateColor = (s) => s === 0 ? C.blue : s === 1 ? "#2D9D78" : s === 2 ? C.gray : C.textLight;
   const slaLabel = (s) => s === 4 ? "Met" : s === 1 ? "Missed" : s === 0 ? "In Progress" : "—";
   const slaColor = (s) => s === 4 ? "#2D9D78" : s === 1 ? C.red : s === 0 ? C.orange : C.gray;
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
@@ -1680,7 +1680,6 @@ function CaseListTable({ cases, metricFilter }) {
   const tdSt = { padding: "10px 12px", fontSize: 12, color: C.textDark, borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" };
   const badge = (text, bg, fg) => <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: bg + "18", color: fg || bg, whiteSpace: "nowrap" }}>{text}</span>;
 
-  // Metric column config
   const metricCol = {
     sla: { header: "SLA Status", cell: (c) => badge(slaLabel(c.slaStatus), slaColor(c.slaStatus)) },
     fcr: { header: "FCR", cell: (c) => c.fcr ? badge("FCR ✓", "#2D9D78") : badge("Not FCR", C.red) },
@@ -1689,142 +1688,114 @@ function CaseListTable({ cases, metricFilter }) {
   };
   const col = metricCol[metricFilter] || null;
 
-  // Aggregate summary
-  const SummaryCard = ({ label, value, color, sub }) => (
+  const SummaryCard = ({ label, value, color }) => (
     <div style={{ flex: 1, minWidth: 100, textAlign: "center", padding: "16px 12px", background: color + "0A", borderRadius: 12, border: `1px solid ${color}20` }}>
       <div style={{ fontSize: 28, fontWeight: 800, color, fontFamily: "'Space Mono', monospace" }}>{value}</div>
       <div style={{ fontSize: 11, fontWeight: 600, color: C.textMid, marginTop: 4 }}>{label}</div>
-      {sub && <div style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 
+  const s = stats;
+  const total = s.total || cases.length;
+
   const buildSummary = () => {
-    const total = cases.length;
     if (metricFilter === "sla") {
-      const met = cases.filter(c => c.slaStatus === 4).length;
-      const missed = cases.filter(c => c.slaStatus === 1).length;
-      const inProg = cases.filter(c => c.slaStatus === 0).length;
-      const na = total - met - missed - inProg;
-      const rate = (met + missed) > 0 ? Math.round(met / (met + missed) * 100) : "N/A";
       return (
         <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <SummaryCard label="Total Cases" value={total} color={C.blue} />
-          <SummaryCard label="SLA Met" value={met} color="#2D9D78" />
-          <SummaryCard label="SLA Missed" value={missed} color={C.red} />
-          <SummaryCard label="In Progress" value={inProg} color={C.orange} />
-          {na > 0 && <SummaryCard label="N/A" value={na} color={C.gray} />}
-          <SummaryCard label="SLA Rate" value={rate === "N/A" ? rate : `${rate}%`} color={rate !== "N/A" && rate >= 90 ? "#2D9D78" : C.red} />
+          <SummaryCard label="SLA Met" value={s.slaMet ?? 0} color="#2D9D78" />
+          <SummaryCard label="SLA Missed" value={s.slaMissed ?? 0} color={C.red} />
+          <SummaryCard label="SLA Rate" value={s.slaRate != null && s.slaRate !== "N/A" ? `${s.slaRate}%` : "N/A"} color={s.slaRate >= 90 ? "#2D9D78" : C.red} />
         </div>
       );
     }
     if (metricFilter === "fcr") {
-      const fcr = cases.filter(c => c.fcr).length;
-      const notFcr = total - fcr;
-      const rate = total > 0 ? Math.round(fcr / total * 100) : "N/A";
+      const fcrCount = s.fcrCases ?? cases.filter(c => c.fcr).length;
       return (
         <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <SummaryCard label="Total Cases" value={total} color={C.blue} />
-          <SummaryCard label="FCR ✓" value={fcr} color="#2D9D78" />
-          <SummaryCard label="Not FCR" value={notFcr} color={C.red} />
-          <SummaryCard label="FCR Rate" value={rate === "N/A" ? rate : `${rate}%`} color={rate !== "N/A" && rate >= 90 ? "#2D9D78" : C.red} />
+          <SummaryCard label="FCR ✓" value={fcrCount} color="#2D9D78" />
+          <SummaryCard label="Not FCR" value={total - fcrCount} color={C.red} />
+          <SummaryCard label="FCR Rate" value={s.fcrRate != null && s.fcrRate !== "N/A" ? `${s.fcrRate}%` : "N/A"} color={s.fcrRate >= 90 ? "#2D9D78" : C.red} />
         </div>
       );
     }
     if (metricFilter === "response") {
-      const met = cases.filter(c => c.responseSlaStatus === 4).length;
-      const missed = cases.filter(c => c.responseSlaStatus === 1).length;
-      const inProg = cases.filter(c => c.responseSlaStatus === 0).length;
-      const na = total - met - missed - inProg;
-      const rate = (met + missed) > 0 ? Math.round(met / (met + missed) * 100) : "N/A";
       return (
         <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <SummaryCard label="Total Cases" value={total} color={C.blue} />
-          <SummaryCard label="Response Met" value={met} color="#2D9D78" />
-          <SummaryCard label="Response Missed" value={missed} color={C.red} />
-          <SummaryCard label="In Progress" value={inProg} color={C.orange} />
-          {na > 0 && <SummaryCard label="N/A" value={na} color={C.gray} />}
-          <SummaryCard label="Response Rate" value={rate === "N/A" ? rate : `${rate}%`} color={rate !== "N/A" && rate >= 90 ? "#2D9D78" : C.red} />
+          <SummaryCard label="Response Met" value={s.responseMet ?? 0} color="#2D9D78" />
+          <SummaryCard label="Response Missed" value={s.responseMissed ?? 0} color={C.red} />
+          <SummaryCard label="Response Rate" value={s.responseRate != null && s.responseRate !== "N/A" ? `${s.responseRate}%` : "N/A"} color={s.responseRate >= 90 ? "#2D9D78" : C.red} />
         </div>
       );
     }
     if (metricFilter === "csat") {
-      const rated = cases.filter(c => c.csatReceived && c.csatScore != null);
-      const notRated = total - rated.length;
-      const avg = rated.length > 0 ? +(rated.reduce((a, c) => a + c.csatScore, 0) / rated.length).toFixed(1) : "N/A";
+      const rated = s.csatResponses ?? cases.filter(c => c.csatReceived).length;
       return (
         <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <SummaryCard label="Total Cases" value={total} color={C.blue} />
-          <SummaryCard label="CSAT Rated" value={rated.length} color="#2D9D78" />
-          <SummaryCard label="No Rating" value={notRated} color={C.gray} />
-          <SummaryCard label="Avg CSAT" value={avg === "N/A" ? avg : `${avg}/5`} color={avg !== "N/A" && avg >= 4 ? "#2D9D78" : avg !== "N/A" && avg >= 3 ? C.orange : C.red} />
+          <SummaryCard label="CSAT Rated" value={rated} color="#2D9D78" />
+          <SummaryCard label="No Rating" value={total - rated} color={C.gray} />
+          <SummaryCard label="Avg CSAT" value={s.csatAvg != null && s.csatAvg !== "N/A" ? `${s.csatAvg}/5` : "N/A"} color={s.csatAvg >= 4 ? "#2D9D78" : s.csatAvg >= 3 ? C.orange : C.red} />
         </div>
       );
     }
     if (metricFilter === "cases") {
-      const open = cases.filter(c => c.stateCode === 0).length;
-      const resolved = cases.filter(c => c.stateCode === 1).length;
-      const other = total - open - resolved;
+      const open = s.activeCases ?? cases.filter(c => c.stateCode === 0).length;
+      const resolved = s.resolvedCases ?? cases.filter(c => c.stateCode === 1).length;
       return (
         <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <SummaryCard label="Total Cases" value={total} color={C.blue} />
           <SummaryCard label="Open" value={open} color={C.blue} />
           <SummaryCard label="Resolved" value={resolved} color="#2D9D78" />
-          {other > 0 && <SummaryCard label="Other" value={other} color={C.gray} />}
         </div>
       );
     }
     return null;
   };
 
-  const renderTable = (rows, label) => (
-    <div style={{ marginBottom: 16 }}>
-      {label && <div style={{ fontSize: 13, fontWeight: 700, color: C.textMid, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>{label} <span style={{ fontSize: 11, fontWeight: 500, color: C.textLight }}>({rows.length})</span></div>}
-      <div style={{ overflowX: "auto", borderRadius: 10, border: `1px solid ${C.border}` }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead><tr style={{ background: C.bg }}>
-            <th style={thSt}>Ticket #</th>
-            <th style={{ ...thSt, minWidth: 200 }}>Title</th>
-            <th style={thSt}>Priority</th>
-            <th style={thSt}>Status</th>
-            {col && <th style={thSt}>{col.header}</th>}
-            <th style={thSt}>Created</th>
-          </tr></thead>
-          <tbody>{rows.map(c => (
-            <tr key={c.id} style={{ transition: "background 0.15s" }} onMouseEnter={e => e.currentTarget.style.background = `${C.accent}08`} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              <td style={{ ...tdSt, fontFamily: "'Space Mono', monospace", fontWeight: 600, fontSize: 11, color: C.accent }}>{c.ticket}</td>
-              <td style={{ ...tdSt, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</td>
-              <td style={tdSt}>{badge(priLabel(c.priority), priColor(c.priority))}</td>
-              <td style={tdSt}>{badge(stateLabel(c.stateCode), stateColor(c.stateCode))}</td>
-              {col && <td style={tdSt}>{col.cell(c)}</td>}
-              <td style={{ ...tdSt, fontFamily: "'Space Mono', monospace", fontSize: 10, color: C.textMid, whiteSpace: "nowrap" }}>{fmtDate(c.created)}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-    </div>
-  );
-
-  // Cases Created/Resolved — split into open and closed tables
-  if (metricFilter === "cases") {
-    const open = cases.filter(c => c.stateCode === 0);
-    const closed = cases.filter(c => c.stateCode === 1);
-    const other = cases.filter(c => c.stateCode !== 0 && c.stateCode !== 1);
+  const renderTable = (rows, label) => {
+    if (!rows || rows.length === 0) return null;
     return (
-      <div style={{ marginTop: 18 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📋 {heading}</div>
-        {buildSummary()}
-        {open.length > 0 && renderTable(open, "🔵 Open Cases")}
-        {closed.length > 0 && renderTable(closed, "✅ Resolved Cases")}
-        {other.length > 0 && renderTable(other, "Other")}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.textMid, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>{label} <span style={{ fontSize: 11, fontWeight: 500, color: C.textLight }}>({rows.length})</span></div>
+        <div style={{ overflowX: "auto", borderRadius: 10, border: `1px solid ${C.border}` }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: C.bg }}>
+              <th style={thSt}>Ticket #</th>
+              <th style={{ ...thSt, minWidth: 200 }}>Title</th>
+              <th style={thSt}>Priority</th>
+              {col && <th style={thSt}>{col.header}</th>}
+              <th style={thSt}>Created</th>
+            </tr></thead>
+            <tbody>{rows.map(c => (
+              <tr key={c.id} style={{ transition: "background 0.15s" }} onMouseEnter={e => e.currentTarget.style.background = `${C.accent}08`} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <td style={{ ...tdSt, fontFamily: "'Space Mono', monospace", fontWeight: 600, fontSize: 11, color: C.accent }}>{c.ticket}</td>
+                <td style={{ ...tdSt, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</td>
+                <td style={tdSt}>{badge(priLabel(c.priority), priColor(c.priority))}</td>
+                {col && <td style={tdSt}>{col.cell(c)}</td>}
+                <td style={{ ...tdSt, fontFamily: "'Space Mono', monospace", fontSize: 10, color: C.textMid, whiteSpace: "nowrap" }}>{fmtDate(c.created)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
       </div>
     );
-  }
+  };
+
+  // Split all cases into resolved (stateCode 1) and active (stateCode 0)
+  const resolved = cases.filter(c => c.stateCode === 1);
+  const active = cases.filter(c => c.stateCode === 0);
+  const other = cases.filter(c => c.stateCode !== 0 && c.stateCode !== 1);
 
   return (
     <div style={{ marginTop: 18 }}>
       <div style={{ fontSize: 16, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📋 {heading}</div>
       {buildSummary()}
-      {renderTable(cases)}
+      {renderTable(resolved, "✅ Resolved")}
+      {renderTable(active, "🔵 Active")}
+      {renderTable(other, "Other")}
     </div>
   );
 }
@@ -1900,7 +1871,12 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
           <PhoneStat icon="⏱️" label="Avg Phone AHT" value={d.memberAHT ?? "N/A"} accent={C.textMid} />
         </div>
       )}
-      {showCaseList && <CaseListTable cases={d.caseList} metricFilter={metricFilter} />}
+      {showCaseList && <CaseListTable cases={d.caseList} metricFilter={metricFilter} stats={{
+        total: d.totalCases, slaMet: d.slaMet, slaMissed: d.slaMissed, slaRate: d.slaCompliance,
+        responseMet: d.responseMet, responseMissed: d.responseMissed, responseRate: d.responseCompliance,
+        fcrRate: d.fcrRate, fcrCases: d.fcrCases, activeCases: d.activeCases, resolvedCases: d.resolvedCases,
+        csatAvg: d.csatAvg, csatResponses: d.csatResponses,
+      }} />}
     </div>
   );
 }
