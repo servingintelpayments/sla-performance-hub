@@ -1522,7 +1522,7 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
   if (t.metrics.includes("sla_response")) allMetrics.push({ label: "Response SLA", value: d.slaResponseCompliance, target: 90, unit: "%", group: "sla" });
   if (t.metrics.includes("open_breach_rate")) allMetrics.push({ label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: d.openBreachCount > 0 ? `${d.openBreachCount} of ${d.openBreachTotal} active` : null, group: "sla" });
   if (t.metrics.includes("fcr_rate")) allMetrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%", group: "fcr" });
-  if (t.metrics.includes("escalation_rate")) allMetrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "cases" });
+  if (t.metrics.includes("escalation_rate")) allMetrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "_all" });
   if (t.metrics.includes("avg_resolution_time")) {
     const raw = d.avgResolutionTime || "N/A";
     const num = parseFloat(raw);
@@ -1767,14 +1767,14 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
     { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%", group: "sla" },
     { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active`, group: "sla" },
     { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%", group: "fcr" },
-    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "cases" },
+    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "_all" },
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true, group: "response" },
     { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5", group: "csat" },
   ] : [
     { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%", group: "sla" },
     { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%", group: "sla" },
     { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active`, group: "sla" },
-    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "cases" },
+    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "_all" },
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true, group: "response" },
   ];
   const metrics = metricFilter === "all" ? allMetrics : allMetrics.filter(mt => mt.group === metricFilter);
@@ -1865,7 +1865,7 @@ function ChartsPanel({ data, metricFilter = "all" }) {
   const tl = data.timeline;
   if (!tl || tl.length < 2) return null;
   const interval = Math.max(0, Math.floor(tl.length / 8));
-  const showCases = metricFilter === "all" || metricFilter === "cases";
+  const showCases = metricFilter === "all";
   const showSLA = metricFilter === "all" || metricFilter === "sla";
   const showPhone = metricFilter === "all" || metricFilter === "phone";
   const showCSAT = metricFilter === "all" || metricFilter === "csat";
