@@ -1165,10 +1165,44 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
   const allCases = t1Cases + t2Cases + t3Cases;
   const allResolved = t1Resolved + t2Resolved + t3Resolved;
 
+  // Fetch case details per tier for drill-down lists
+  const fetchTierCaseList = async (tierCode, dateField) => {
+    try {
+      progress(`Fetching Tier ${tierCode} case details...`);
+      const caseData = await d365Fetch(
+        `incidents?$filter=casetypecode eq ${tierCode} and ${dateField} ge ${s}T${sT} and ${dateField} le ${e}T${eT}&$select=incidentid,title,ticketnumber,prioritycode,statecode,statuscode,createdon,modifiedon,cr7fe_new_fcr,isescalated,cr7fe_new_csatresponsereceived,cr7fe_new_csatscore,caseorigincode&$expand=resolvebykpiid($select=status),firstresponsebykpiid($select=status)&$orderby=createdon desc&$top=500`
+      );
+      return (caseData.value || []).map(c => ({
+        id: c.incidentid,
+        title: c.title || "Untitled",
+        ticket: c.ticketnumber || "—",
+        priority: c.prioritycode,
+        stateCode: c.statecode,
+        statusCode: c.statuscode,
+        created: c.createdon,
+        modified: c.modifiedon,
+        fcr: c.cr7fe_new_fcr === true,
+        escalated: c.isescalated === true,
+        csatReceived: c.cr7fe_new_csatresponsereceived === true,
+        csatScore: c.cr7fe_new_csatscore != null ? parseFloat(c.cr7fe_new_csatscore) : null,
+        slaStatus: c.resolvebykpiid?.status ?? null,
+        responseSlaStatus: c.firstresponsebykpiid?.status ?? null,
+        origin: c.caseorigincode,
+      }));
+    } catch (err) {
+      errors.push(`Tier ${tierCode} case list: ${err.message}`);
+      return [];
+    }
+  };
+
+  const t1CaseList = await fetchTierCaseList(1, "createdon");
+  const t2CaseList = await fetchTierCaseList(2, "escalatedon");
+  const t3CaseList = await fetchTierCaseList(3, "escalatedon");
+
   return {
-    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: t1SLAMissed, slaCompliance: (t1SLAMet + t1SLAMissed) > 0 ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + t1SLAMissed) * 100)) : "N/A", slaResponseMet: t1ResponseSLA.met, slaResponseMissed: t1ResponseSLA.missed, slaResponseCompliance: (t1ResponseSLA.met + t1ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t1ResponseSLA.met / (t1ResponseSLA.met + t1ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t1OpenBreach.breached, openBreachTotal: t1OpenBreach.total, openBreachRate: t1OpenBreach.total > 0 ? Math.min(100, Math.round(t1OpenBreach.breached / t1OpenBreach.total * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated },
-    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: t2SLAMissed, slaCompliance: (t2SLAMet + t2SLAMissed) > 0 ? Math.min(100, Math.round(t2SLAMet / (t2SLAMet + t2SLAMissed) * 100)) : "N/A", slaResponseMet: t2ResponseSLA.met, slaResponseMissed: t2ResponseSLA.missed, slaResponseCompliance: (t2ResponseSLA.met + t2ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t2ResponseSLA.met / (t2ResponseSLA.met + t2ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t2OpenBreach.breached, openBreachTotal: t2OpenBreach.total, openBreachRate: t2OpenBreach.total > 0 ? Math.min(100, Math.round(t2OpenBreach.breached / t2OpenBreach.total * 100)) : 0, escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated },
-    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: t3SLAMissed, slaCompliance: (t3SLAMet + t3SLAMissed) > 0 ? Math.min(100, Math.round(t3SLAMet / (t3SLAMet + t3SLAMissed) * 100)) : "N/A", slaResponseMet: t3ResponseSLA.met, slaResponseMissed: t3ResponseSLA.missed, slaResponseCompliance: (t3ResponseSLA.met + t3ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t3ResponseSLA.met / (t3ResponseSLA.met + t3ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t3OpenBreach.breached, openBreachTotal: t3OpenBreach.total, openBreachRate: t3OpenBreach.total > 0 ? Math.min(100, Math.round(t3OpenBreach.breached / t3OpenBreach.total * 100)) : 0 },
+    tier1: { total: t1Cases, slaMet: t1SLAMet, slaMissed: t1SLAMissed, slaCompliance: (t1SLAMet + t1SLAMissed) > 0 ? Math.min(100, Math.round(t1SLAMet / (t1SLAMet + t1SLAMissed) * 100)) : "N/A", slaResponseMet: t1ResponseSLA.met, slaResponseMissed: t1ResponseSLA.missed, slaResponseCompliance: (t1ResponseSLA.met + t1ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t1ResponseSLA.met / (t1ResponseSLA.met + t1ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t1OpenBreach.breached, openBreachTotal: t1OpenBreach.total, openBreachRate: t1OpenBreach.total > 0 ? Math.min(100, Math.round(t1OpenBreach.breached / t1OpenBreach.total * 100)) : 0, fcrRate: t1Cases ? Math.min(100, Math.round(t1FCR / t1Cases * 100)) : 0, escalationRate: t1Cases ? Math.min(100, Math.round(t1Escalated / t1Cases * 100)) : 0, avgResolutionTime: avgResTime, escalated: t1Escalated, caseList: t1CaseList },
+    tier2: { total: t2Cases, resolved: t2Resolved, slaMet: t2SLAMet, slaMissed: t2SLAMissed, slaCompliance: (t2SLAMet + t2SLAMissed) > 0 ? Math.min(100, Math.round(t2SLAMet / (t2SLAMet + t2SLAMissed) * 100)) : "N/A", slaResponseMet: t2ResponseSLA.met, slaResponseMissed: t2ResponseSLA.missed, slaResponseCompliance: (t2ResponseSLA.met + t2ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t2ResponseSLA.met / (t2ResponseSLA.met + t2ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t2OpenBreach.breached, openBreachTotal: t2OpenBreach.total, openBreachRate: t2OpenBreach.total > 0 ? Math.min(100, Math.round(t2OpenBreach.breached / t2OpenBreach.total * 100)) : 0, escalationRate: t2Cases ? Math.min(100, Math.round(t2Escalated / t2Cases * 100)) : "N/A", escalated: t2Escalated, caseList: t2CaseList },
+    tier3: { total: t3Cases, resolved: t3Resolved, slaMet: t3SLAMet, slaMissed: t3SLAMissed, slaCompliance: (t3SLAMet + t3SLAMissed) > 0 ? Math.min(100, Math.round(t3SLAMet / (t3SLAMet + t3SLAMissed) * 100)) : "N/A", slaResponseMet: t3ResponseSLA.met, slaResponseMissed: t3ResponseSLA.missed, slaResponseCompliance: (t3ResponseSLA.met + t3ResponseSLA.missed) > 0 ? Math.min(100, Math.round(t3ResponseSLA.met / (t3ResponseSLA.met + t3ResponseSLA.missed) * 100)) : "N/A", openBreachCount: t3OpenBreach.breached, openBreachTotal: t3OpenBreach.total, openBreachRate: t3OpenBreach.total > 0 ? Math.min(100, Math.round(t3OpenBreach.breached / t3OpenBreach.total * 100)) : 0, caseList: t3CaseList },
     email: { total: emailCases, responded: emailResponded, resolved: emailResolved, slaCompliance: emailResolved > 0 ? 100 : (emailCases > 0 ? 0 : "N/A") },
     csat: { responses: csatResponses, avgScore: csatAvg },
     overall: { created: allCases, resolved: allResolved, csatResponses, answeredCalls: 0, abandonedCalls: 0 },
@@ -1498,8 +1532,10 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
     allMetrics.push({ label: "CSAT Score", value: data.csat.avgScore, target: 4.0, unit: "/5", group: "csat" });
   }
   const metrics = metricFilter === "all" ? allMetrics : allMetrics.filter(mt => mt.group === metricFilter);
-  const showStats = metricFilter === "all" || metricFilter === "cases" || metricFilter === "sla";
+  const showStats = metricFilter === "all" || metricFilter === "sla";
+  const showMetrics = metricFilter !== "cases";
   const showPhone = tier === 1 && data.phone && (metricFilter === "all" || metricFilter === "phone");
+  const showCaseList = metricFilter !== "all" && metricFilter !== "phone" && d.caseList && d.caseList.length > 0;
   const metricLabel = metricFilter === "all" ? "All Metrics" : metricFilter === "sla" ? "SLA" : metricFilter === "fcr" ? "FCR" : metricFilter === "cases" ? "Cases" : metricFilter === "response" ? "Response Time" : metricFilter === "csat" ? "CSAT" : metricFilter === "phone" ? "Phone" : "Filtered";
   return (
     <div style={{ marginBottom: 24 }}>
@@ -1524,12 +1560,13 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
         <StatCard label="Total Cases" value={d.total} color={t.colorDark} />
         <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
       </div>}
-      {metrics.length > 0 && <>
+      {showMetrics && metrics.length > 0 && <>
       <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>{t.label} SLA Status — {metricLabel}</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {metrics.map((m, i) => (<MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />))}
       </div>
       </>}
+      {showCaseList && <CaseListTable cases={d.caseList} metricFilter={metricFilter} />}
       {showPhone && (() => {
         const totalCalls = data.phone.totalCalls ?? 0;
         const answered = data.phone.answered ?? 0;
@@ -1741,8 +1778,10 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
     { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true, group: "response" },
   ];
   const metrics = metricFilter === "all" ? allMetrics : allMetrics.filter(mt => mt.group === metricFilter);
-  const showStats = metricFilter === "all" || metricFilter === "cases" || metricFilter === "sla";
+  const showStats = metricFilter === "all" || metricFilter === "sla";
+  const showMetrics = metricFilter !== "cases";
   const showPhone = isTier1 && (metricFilter === "all" || metricFilter === "phone");
+  const showCaseList = metricFilter !== "all" && metricFilter !== "phone" && d.caseList && d.caseList.length > 0;
   const PhoneStat = ({ icon, label, value, accent }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 17 }}>{icon}</span><span style={{ fontSize: 14, color: C.textMid }}>{label}</span></div>
@@ -1764,7 +1803,7 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
         <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
       </div>}
-      {metrics.length > 0 && <>
+      {showMetrics && metrics.length > 0 && <>
       <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>Performance Metrics</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
@@ -1784,9 +1823,7 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
           <PhoneStat icon="⏱️" label="Avg Phone AHT" value={d.memberAHT ?? "N/A"} accent={C.textMid} />
         </div>
       )}
-      {metricFilter !== "phone" && d.caseList && d.caseList.length > 0 && (
-        <CaseListTable cases={d.caseList} metricFilter={metricFilter} />
-      )}
+      {showCaseList && <CaseListTable cases={d.caseList} metricFilter={metricFilter} />}
     </div>
   );
 }
@@ -3159,8 +3196,8 @@ function Dashboard({ user, onLogout }) {
               {memberData.length > 0 ? (
                 <>
                   {memberData.map((md, i) => (<MemberSection key={md.member.id} memberData={md} index={i} metricFilter={selectedMetric} />))}
-                  <TeamSummary memberDataList={memberData} />
-                  <Definitions />
+                  {selectedMetric === "all" && <TeamSummary memberDataList={memberData} />}
+                  {selectedMetric === "all" && <Definitions />}
                 </>
               ) : (
                 <>
@@ -3170,8 +3207,8 @@ function Dashboard({ user, onLogout }) {
                     if (selectedTierNum) { return <TierSection tier={selectedTierNum} data={data} members={teamMembers} metricFilter={selectedMetric} />; }
                     return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} metricFilter={selectedMetric} />);
                   })()}
-                  <OverallSummary data={data} />
-                  <Definitions />
+                  {selectedMetric === "all" && <OverallSummary data={data} />}
+                  {selectedMetric === "all" && <Definitions />}
                 </>
               )}
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
