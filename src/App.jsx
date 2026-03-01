@@ -589,6 +589,35 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     }
   } catch (err) { errors.push(`${member.name} — ResTime: ${err.message}`); }
 
+  // Fetch detailed case list for drill-down display
+  let caseList = [];
+  try {
+    progress("Case details...");
+    const caseData = await d365Fetch(
+      `incidents?$filter=_ownerid_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid,title,ticketnumber,prioritycode,statecode,statuscode,createdon,modifiedon,cr7fe_new_fcr,isescalated,cr7fe_new_csatresponsereceived,cr7fe_new_csatscore,caseorigincode&$expand=resolvebykpiid($select=status),firstresponsebykpiid($select=status)&$orderby=createdon desc&$top=200`
+    );
+    caseList = (caseData.value || []).map(c => ({
+      id: c.incidentid,
+      title: c.title || "Untitled",
+      ticket: c.ticketnumber || "—",
+      priority: c.prioritycode,
+      stateCode: c.statecode,
+      statusCode: c.statuscode,
+      created: c.createdon,
+      modified: c.modifiedon,
+      fcr: c.cr7fe_new_fcr === true,
+      escalated: c.isescalated === true,
+      csatReceived: c.cr7fe_new_csatresponsereceived === true,
+      csatScore: c.cr7fe_new_csatscore != null ? parseFloat(c.cr7fe_new_csatscore) : null,
+      slaStatus: c.resolvebykpiid?.status ?? null,
+      responseSlaStatus: c.firstresponsebykpiid?.status ?? null,
+      origin: c.caseorigincode,
+    }));
+    console.log(`[D365 CaseList] ${member.name}: ${caseList.length} cases`);
+  } catch (err) {
+    errors.push(`${member.name} — Case details: ${err.message}`);
+  }
+
   const slaCompliance = (slaMet + slaMissed) > 0 ? Math.min(100, Math.round(slaMet / (slaMet + slaMissed) * 100)) : "N/A";
   const responseCompliance = (responseMet + responseMissed) > 0 ? Math.min(100, Math.round(responseMet / (responseMet + responseMissed) * 100)) : "N/A";
   const openBreachRate = openBreachTotal > 0 ? Math.min(100, Math.round(openBreachCount / openBreachTotal * 100)) : 0;
@@ -606,6 +635,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
     totalPhoneCalls, incomingCalls, outgoingCalls, answeredLive, voicemails, memberAHT,
     csatResponses, csatAvg,
     avgResTime: typeof avgResTime === "number" ? `${avgResTime} hrs` : avgResTime,
+    caseList,
     errors,
   };
 }
@@ -1591,6 +1621,100 @@ function Definitions() {
   );
 }
 
+function CaseListTable({ cases, metricFilter }) {
+  if (!cases || cases.length === 0) return null;
+
+  // Filter cases based on selected metric
+  let filtered = cases;
+  let heading = "All Cases";
+  if (metricFilter === "sla") {
+    filtered = cases.filter(c => c.slaStatus === 4 || c.slaStatus === 1);
+    heading = "SLA-Related Cases";
+  } else if (metricFilter === "fcr") {
+    filtered = cases.filter(c => c.fcr);
+    heading = "First Contact Resolution Cases";
+  } else if (metricFilter === "cases") {
+    // Show all — we'll split into open/closed below
+    heading = "Cases Created / Resolved";
+  } else if (metricFilter === "response") {
+    filtered = cases.filter(c => c.responseSlaStatus === 4 || c.responseSlaStatus === 1);
+    heading = "Response SLA Cases";
+  } else if (metricFilter === "csat") {
+    filtered = cases.filter(c => c.csatReceived);
+    heading = "CSAT-Rated Cases";
+  }
+
+  if (filtered.length === 0) return <div style={{ padding: 16, fontSize: 13, color: C.textLight, textAlign: "center" }}>No cases found for this metric.</div>;
+
+  const priLabel = (p) => p === 1 ? "High" : p === 2 ? "Normal" : p === 3 ? "Low" : "—";
+  const priColor = (p) => p === 1 ? C.red : p === 2 ? C.blue : p === 3 ? C.green : C.gray;
+  const stateLabel = (s) => s === 0 ? "Active" : s === 1 ? "Resolved" : s === 2 ? "Cancelled" : "—";
+  const stateColor = (s) => s === 0 ? C.blue : s === 1 ? "#2D9D78" : s === 2 ? C.gray : C.textLight;
+  const slaLabel = (s) => s === 4 ? "Met" : s === 1 ? "Missed" : s === 0 ? "In Progress" : "—";
+  const slaColor = (s) => s === 4 ? "#2D9D78" : s === 1 ? C.red : s === 0 ? C.orange : C.gray;
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+
+  const thSt = { padding: "10px 12px", fontSize: 11, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.5, textAlign: "left", borderBottom: `2px solid ${C.border}`, whiteSpace: "nowrap" };
+  const tdSt = { padding: "10px 12px", fontSize: 12, color: C.textDark, borderBottom: `1px solid ${C.border}`, verticalAlign: "middle" };
+  const badge = (text, bg, fg) => <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: bg + "18", color: fg || bg, whiteSpace: "nowrap" }}>{text}</span>;
+
+  const renderTable = (rows, label) => (
+    <div style={{ marginBottom: 16 }}>
+      {label && <div style={{ fontSize: 13, fontWeight: 700, color: C.textMid, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>{label} <span style={{ fontSize: 11, fontWeight: 500, color: C.textLight }}>({rows.length})</span></div>}
+      <div style={{ overflowX: "auto", borderRadius: 10, border: `1px solid ${C.border}` }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: C.bg }}>
+            <th style={thSt}>Ticket #</th>
+            <th style={{ ...thSt, minWidth: 200 }}>Title</th>
+            <th style={thSt}>Priority</th>
+            <th style={thSt}>Status</th>
+            {(metricFilter === "all" || metricFilter === "sla") && <th style={thSt}>SLA</th>}
+            {(metricFilter === "all" || metricFilter === "response") && <th style={thSt}>Response SLA</th>}
+            {metricFilter === "fcr" && <th style={thSt}>FCR</th>}
+            {metricFilter === "csat" && <th style={thSt}>CSAT Score</th>}
+            <th style={thSt}>Created</th>
+          </tr></thead>
+          <tbody>{rows.map(c => (
+            <tr key={c.id} style={{ transition: "background 0.15s" }} onMouseEnter={e => e.currentTarget.style.background = `${C.accent}08`} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <td style={{ ...tdSt, fontFamily: "'Space Mono', monospace", fontWeight: 600, fontSize: 11, color: C.accent }}>{c.ticket}</td>
+              <td style={{ ...tdSt, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</td>
+              <td style={tdSt}>{badge(priLabel(c.priority), priColor(c.priority))}</td>
+              <td style={tdSt}>{badge(stateLabel(c.stateCode), stateColor(c.stateCode))}</td>
+              {(metricFilter === "all" || metricFilter === "sla") && <td style={tdSt}>{badge(slaLabel(c.slaStatus), slaColor(c.slaStatus))}</td>}
+              {(metricFilter === "all" || metricFilter === "response") && <td style={tdSt}>{badge(slaLabel(c.responseSlaStatus), slaColor(c.responseSlaStatus))}</td>}
+              {metricFilter === "fcr" && <td style={tdSt}>{badge("FCR ✓", "#2D9D78")}</td>}
+              {metricFilter === "csat" && <td style={tdSt}>{c.csatScore != null ? badge(`${c.csatScore}/5`, c.csatScore >= 4 ? "#2D9D78" : c.csatScore >= 3 ? C.orange : C.red) : "—"}</td>}
+              <td style={{ ...tdSt, fontFamily: "'Space Mono', monospace", fontSize: 10, color: C.textMid, whiteSpace: "nowrap" }}>{fmtDate(c.created)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  // For "cases" metric, split into open and closed
+  if (metricFilter === "cases") {
+    const open = filtered.filter(c => c.stateCode === 0);
+    const closed = filtered.filter(c => c.stateCode === 1);
+    const other = filtered.filter(c => c.stateCode !== 0 && c.stateCode !== 1);
+    return (
+      <div style={{ marginTop: 18 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📋 {heading}</div>
+        {open.length > 0 && renderTable(open, "🔵 Open Cases")}
+        {closed.length > 0 && renderTable(closed, "✅ Resolved Cases")}
+        {other.length > 0 && renderTable(other, "Other")}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📋 {heading}</div>
+      {renderTable(filtered)}
+    </div>
+  );
+}
+
 function MemberSection({ memberData, index, metricFilter = "all" }) {
   const d = memberData;
   const m = d.member;
@@ -1659,6 +1783,9 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
           {d.phoneSource !== "8x8" && <PhoneStat icon="❌" label="Abandoned Calls" value={d.voicemails ?? 0} accent="#E5544B" />}
           <PhoneStat icon="⏱️" label="Avg Phone AHT" value={d.memberAHT ?? "N/A"} accent={C.textMid} />
         </div>
+      )}
+      {metricFilter !== "phone" && d.caseList && d.caseList.length > 0 && (
+        <CaseListTable cases={d.caseList} metricFilter={metricFilter} />
       )}
     </div>
   );
