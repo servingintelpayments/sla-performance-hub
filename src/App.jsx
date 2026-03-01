@@ -1445,7 +1445,7 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function TierSection({ tier, data, members }) {
+function TierSection({ tier, data, members, metricFilter = "all" }) {
   const t = TIERS[tier]; if (!t) return null;
   const d = data[`tier${tier}`]; if (!d) return null;
   const tierMembers = (members || []).filter(m => m.tier === tier);
@@ -1453,20 +1453,24 @@ function TierSection({ tier, data, members }) {
   const slaMet = d.slaMet || 0;
   const slaMissed = d.slaMissed || 0;
   const slaTotal = slaMet + slaMissed;
-  const metrics = [];
-  if (t.metrics.includes("sla_compliance")) metrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%" });
-  if (t.metrics.includes("sla_response")) metrics.push({ label: "Response SLA", value: d.slaResponseCompliance, target: 90, unit: "%" });
-  if (t.metrics.includes("open_breach_rate")) metrics.push({ label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: d.openBreachCount > 0 ? `${d.openBreachCount} of ${d.openBreachTotal} active` : null });
-  if (t.metrics.includes("fcr_rate")) metrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" });
-  if (t.metrics.includes("escalation_rate")) metrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true });
+  const allMetrics = [];
+  if (t.metrics.includes("sla_compliance")) allMetrics.push({ label: "SLA Compliance", value: slaRate, target: 90, unit: "%", group: "sla" });
+  if (t.metrics.includes("sla_response")) allMetrics.push({ label: "Response SLA", value: d.slaResponseCompliance, target: 90, unit: "%", group: "sla" });
+  if (t.metrics.includes("open_breach_rate")) allMetrics.push({ label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: d.openBreachCount > 0 ? `${d.openBreachCount} of ${d.openBreachTotal} active` : null, group: "sla" });
+  if (t.metrics.includes("fcr_rate")) allMetrics.push({ label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%", group: "fcr" });
+  if (t.metrics.includes("escalation_rate")) allMetrics.push({ label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "cases" });
   if (t.metrics.includes("avg_resolution_time")) {
     const raw = d.avgResolutionTime || "N/A";
     const num = parseFloat(raw);
-    metrics.push({ label: "Avg Resolution Time", value: isNaN(num) ? "N/A" : raw, target: null, unit: "", rawDisplay: true });
+    allMetrics.push({ label: "Avg Resolution Time", value: isNaN(num) ? "N/A" : raw, target: null, unit: "", rawDisplay: true, group: "response" });
   }
   if (tier === 1 && data.csat) {
-    metrics.push({ label: "CSAT Score", value: data.csat.avgScore, target: 4.0, unit: "/5" });
+    allMetrics.push({ label: "CSAT Score", value: data.csat.avgScore, target: 4.0, unit: "/5", group: "csat" });
   }
+  const metrics = metricFilter === "all" ? allMetrics : allMetrics.filter(mt => mt.group === metricFilter);
+  const showStats = metricFilter === "all" || metricFilter === "cases" || metricFilter === "sla";
+  const showPhone = tier === 1 && data.phone && (metricFilter === "all" || metricFilter === "phone");
+  const metricLabel = metricFilter === "all" ? "All Metrics" : metricFilter === "sla" ? "SLA" : metricFilter === "fcr" ? "FCR" : metricFilter === "cases" ? "Cases" : metricFilter === "response" ? "Response Time" : metricFilter === "csat" ? "CSAT" : metricFilter === "phone" ? "Phone" : "Filtered";
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ background: `linear-gradient(135deg, ${t.color}, ${t.colorDark})`, borderRadius: "14px 14px 0 0", padding: "24px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1483,18 +1487,20 @@ function TierSection({ tier, data, members }) {
           </div>
         )}
       </div>
-      <div className="stat-row" style={{ display: "flex", gap: 12, padding: "20px 0", overflowX: "auto" }}>
+      {showStats && <div className="stat-row" style={{ display: "flex", gap: 12, padding: "20px 0", overflowX: "auto" }}>
         <StatCard label={`${t.label} SLA Rate`} value={slaRate === "N/A" ? "N/A" : `${slaRate}%`} color={slaRate !== "N/A" && slaRate >= 90 ? "#2D9D78" : "#E5544B"} />
         <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color="#2D9D78" />
         <StatCard label="SLAs Missed" value={`${slaMissed}/${slaTotal}`} color={slaMissed > 0 ? "#E5544B" : "#2D9D78"} />
         <StatCard label="Total Cases" value={d.total} color={t.colorDark} />
         <StatCard label="Metrics" value={metrics.length} color={C.textMid} />
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>{t.label} SLA Status — All Metrics</div>
+      </div>}
+      {metrics.length > 0 && <>
+      <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>{t.label} SLA Status — {metricLabel}</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {metrics.map((m, i) => (<MetricCard key={i} label={m.label} value={m.value} target={m.target} unit={m.unit} inverse={m.inverse} />))}
       </div>
-      {tier === 1 && data.phone && (() => {
+      </>}
+      {showPhone && (() => {
         const totalCalls = data.phone.totalCalls ?? 0;
         const answered = data.phone.answered ?? 0;
         const abandoned = data.phone.abandoned ?? 0;
@@ -1585,7 +1591,7 @@ function Definitions() {
   );
 }
 
-function MemberSection({ memberData, index }) {
+function MemberSection({ memberData, index, metricFilter = "all" }) {
   const d = memberData;
   const m = d.member;
   const isTier1 = m.tier === 1;
@@ -1595,21 +1601,24 @@ function MemberSection({ memberData, index }) {
   const slaMet = d.slaMet || 0;
   const slaMissed = d.slaMissed || 0;
   const slaTotal = slaMet + slaMissed;
-  const metrics = isTier1 ? [
-    { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
-    { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%" },
-    { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active` },
-    { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%" },
-    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
-    { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
-    { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5" },
+  const allMetrics = isTier1 ? [
+    { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%", group: "sla" },
+    { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%", group: "sla" },
+    { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active`, group: "sla" },
+    { label: "First Call Resolution", value: d.fcrRate, target: 90, unit: "%", group: "fcr" },
+    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "cases" },
+    { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true, group: "response" },
+    { label: "CSAT Score", value: d.csatAvg, target: 4.0, unit: "/5", group: "csat" },
   ] : [
-    { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%" },
-    { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%" },
-    { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active` },
-    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true },
-    { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true },
+    { label: "SLA Compliance", value: d.slaCompliance, target: 90, unit: "%", group: "sla" },
+    { label: "Response SLA", value: d.responseCompliance, target: 90, unit: "%", group: "sla" },
+    { label: "Open SLA Breach", value: d.openBreachRate, target: 5, unit: "%", inverse: true, sub: `${d.openBreachCount || 0} of ${d.openBreachTotal || 0} active`, group: "sla" },
+    { label: "Escalation Rate", value: d.escalationRate, target: 10, unit: "%", inverse: true, group: "cases" },
+    { label: "Avg Resolution Time", value: d.avgResTime || "N/A", target: null, unit: "", rawDisplay: true, group: "response" },
   ];
+  const metrics = metricFilter === "all" ? allMetrics : allMetrics.filter(mt => mt.group === metricFilter);
+  const showStats = metricFilter === "all" || metricFilter === "cases" || metricFilter === "sla";
+  const showPhone = isTier1 && (metricFilter === "all" || metricFilter === "phone");
   const PhoneStat = ({ icon, label, value, accent }) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 17 }}>{icon}</span><span style={{ fontSize: 14, color: C.textMid }}>{label}</span></div>
@@ -1624,18 +1633,20 @@ function MemberSection({ memberData, index }) {
           <div><div style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>{m.name}</div><div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{m.role}{m.email ? ` · ${m.email}` : ""}</div></div>
         </div>
       </div>
-      <div className="stat-row" style={{ display: "flex", gap: 12, padding: "20px 0", overflowX: "auto" }}>
+      {showStats && <div className="stat-row" style={{ display: "flex", gap: 12, padding: "20px 0", overflowX: "auto" }}>
         <StatCard label="Cases Owned" value={d.totalCases} color={color} />
         <StatCard label="Cases Created" value={d.casesCreatedBy ?? "—"} color={C.blue} />
         <StatCard label="Resolved" value={d.resolvedCases} color="#2D9D78" />
         <StatCard label="Active" value={d.activeCases} color={C.blue} />
         <StatCard label="SLAs Met" value={`${slaMet}/${slaTotal}`} color={slaMet > 0 ? "#2D9D78" : "#E5544B"} />
-      </div>
+      </div>}
+      {metrics.length > 0 && <>
       <div style={{ fontSize: 16, fontWeight: 600, color: C.textDark, marginBottom: 14 }}>Performance Metrics</div>
       <div className="metric-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {metrics.map((mt, i) => (<MetricCard key={i} label={mt.label} value={mt.value} target={mt.target} unit={mt.unit} inverse={mt.inverse} />))}
       </div>
-      {isTier1 && (
+      </>}
+      {showPhone && (
         <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 20 }}>📞</span> Phone Activity
@@ -1686,28 +1697,34 @@ function TeamSummary({ memberDataList }) {
   );
 }
 
-function ChartsPanel({ data }) {
+function ChartsPanel({ data, metricFilter = "all" }) {
   const tl = data.timeline;
   if (!tl || tl.length < 2) return null;
   const interval = Math.max(0, Math.floor(tl.length / 8));
+  const showCases = metricFilter === "all" || metricFilter === "cases";
+  const showSLA = metricFilter === "all" || metricFilter === "sla";
+  const showPhone = metricFilter === "all" || metricFilter === "phone";
+  const showCSAT = metricFilter === "all" || metricFilter === "csat";
+  const visibleCharts = [showCases, showSLA, showPhone, showCSAT].filter(Boolean).length;
+  const gridCols = visibleCharts === 1 ? "1fr" : "1fr 1fr";
   return (
-    <div className="chart-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
+    <div className="chart-grid-2" style={{ display: "grid", gridTemplateColumns: gridCols, gap: 16, marginTop: 20 }}>
+      {showCases && <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📊 Daily Cases by Tier</div>
         <ResponsiveContainer width="100%" height={220}><BarChart data={tl}><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Legend iconType="circle" iconSize={7} formatter={(v) => <span style={{ fontSize: 10, color: C.textMid }}>{v}</span>} /><Bar dataKey="t1Cases" name="Tier 1" fill={TIERS[1].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t2Cases" name="Tier 2" fill={TIERS[2].color} radius={[3,3,0,0]} barSize={14} /><Bar dataKey="t3Cases" name="Tier 3" fill={TIERS[3].color} radius={[3,3,0,0]} barSize={14} /></BarChart></ResponsiveContainer>
-      </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
+      </div>}
+      {showSLA && <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📈 SLA Compliance Trend</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="slaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity={0.3} /><stop offset="100%" stopColor={C.green} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[50, 100]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="sla" name="SLA %" stroke={C.green} fill="url(#slaG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
-      </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
+      </div>}
+      {showPhone && <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>📞 Daily Call Volume</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="callG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity={0.3} /><stop offset="100%" stopColor={C.blue} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="calls" name="Calls" stroke={C.blue} fill="url(#callG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
-      </div>
-      <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
+      </div>}
+      {showCSAT && <div style={{ background: C.card, borderRadius: 14, padding: 20, border: "none",  }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.textDark, marginBottom: 14 }}>⭐ CSAT Score Trend</div>
         <ResponsiveContainer width="100%" height={220}><AreaChart data={tl}><defs><linearGradient id="csatG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.gold} stopOpacity={0.3} /><stop offset="100%" stopColor={C.gold} stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke={C.border} /><XAxis dataKey="date" fontSize={9} tick={{ fill: C.textLight }} interval={interval} /><YAxis fontSize={10} tick={{ fill: C.textLight }} domain={[1, 5]} /><Tooltip content={<CTooltip />} /><Area type="monotone" dataKey="csat" name="CSAT" stroke={C.gold} fill="url(#csatG)" strokeWidth={2} /></AreaChart></ResponsiveContainer>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -3014,17 +3031,17 @@ function Dashboard({ user, onLogout }) {
               )}
               {memberData.length > 0 ? (
                 <>
-                  {memberData.map((md, i) => (<MemberSection key={md.member.id} memberData={md} index={i} />))}
+                  {memberData.map((md, i) => (<MemberSection key={md.member.id} memberData={md} index={i} metricFilter={selectedMetric} />))}
                   <TeamSummary memberDataList={memberData} />
                   <Definitions />
                 </>
               ) : (
                 <>
                   {(() => {
-                    if (selectedQueue === "all") { return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />); }
+                    if (selectedQueue === "all") { return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} metricFilter={selectedMetric} />); }
                     const selectedTierNum = queues.find(q => q.id === selectedQueue)?.tierNum;
-                    if (selectedTierNum) { return <TierSection tier={selectedTierNum} data={data} members={teamMembers} />; }
-                    return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} />);
+                    if (selectedTierNum) { return <TierSection tier={selectedTierNum} data={data} members={teamMembers} metricFilter={selectedMetric} />; }
+                    return [1, 2, 3].map(t => <TierSection key={t} tier={t} data={data} members={teamMembers} metricFilter={selectedMetric} />);
                   })()}
                   <OverallSummary data={data} />
                   <Definitions />
@@ -3033,7 +3050,7 @@ function Dashboard({ user, onLogout }) {
               <div style={{ background: C.primaryDark, padding: 14, textAlign: "center", borderRadius: "0 0 14px 14px" }}>
                 <p style={{ margin: 0, color: "#a8c6df", fontSize: 11 }}>Report generated from live Dynamics 365 data by Service and Operations Dashboard</p>
               </div>
-              <ChartsPanel data={data} />
+              <ChartsPanel data={data} metricFilter={selectedMetric} />
             </div>
           )}
         </div>
