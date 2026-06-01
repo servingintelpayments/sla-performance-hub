@@ -1475,7 +1475,7 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
             <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 20 }}>📞</span> PHONE METRICS
               {data.phoneAcs && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>ACS LIVE</span>}
-              {!data.phoneAcs && <span style={{ fontSize: 9, background: C.d365, color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>D365</span>}
+              {!data.phoneAcs && <span style={{ fontSize: 9, background: C.gray, color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>ACS NOT CONFIGURED</span>}
             </div>
             <MR icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
             <MR icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
