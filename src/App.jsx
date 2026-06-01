@@ -28,7 +28,6 @@ const MSAL_CONFIG = {
 const D365_SCOPE = "https://servingintel.crm.dynamics.com/user_impersonation";
 const D365_BASE = "https://servingintel.crm.dynamics.com/api/data/v9.2";
 const GRAPH_SCOPE = "Mail.Send";
-const ACS_PHONE_METRICS_URL = "https://si-genesis-voice-dev-b2dbd8esfzaxdecq.westus2-01.azurewebsites.net/api/conversations";
 
 let msalInstance = null;
 function getMsal() {
@@ -1115,7 +1114,7 @@ async function fetchLiveData(config, startDate, endDate, onProgress, startTime, 
   // Phone data comes from ServingIntel ACS when a metrics API URL is configured
   let phoneData = { totalCalls: 0, answered: 0, abandoned: 0, incoming: 0, outgoing: 0, answerRate: 0, avgAHT: "N/A", voicemails: 0 };
   let phoneAcs = null;
-  const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl") || ACS_PHONE_METRICS_URL;
+  const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl");
   if (acsMetricsUrl) {
     phoneAcs = await fetchAcsPhoneData(acsMetricsUrl, startDate, endDate, startTime, endTime, progress);
     if (phoneAcs?.summary) {
@@ -1903,7 +1902,7 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
   const [local, setLocal] = useState(config);
   const [d365Status, setD365Status] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
-  const [acsMetricsUrl, setAcsMetricsUrl] = useState(localStorage.getItem("acsPhoneMetricsUrl") || ACS_PHONE_METRICS_URL);
+  const [acsMetricsUrl, setAcsMetricsUrl] = useState(localStorage.getItem("acsPhoneMetricsUrl") || "");
   const [flowTestStatus, setFlowTestStatus] = useState(null);
   useEffect(() => { setLocal(config); }, [config]);
   if (!show) return null;
@@ -2702,7 +2701,7 @@ function Dashboard({ user, onLogout }) {
     try {
       // Fetch ACS phone data if configured (used by both member and all-tiers)
       let phoneAcs = null;
-      const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl") || ACS_PHONE_METRICS_URL;
+      const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl");
       if (acsMetricsUrl) {
         phoneAcs = await fetchAcsPhoneData(acsMetricsUrl, startDate, endDate, startTime, endTime, setRunProgress);
       }
