@@ -235,7 +235,7 @@ function checkTarget(metricKey, value) {
 const GH_CONFIG = {
   owner: "servingintelPayments",
   repo: "service-desk-reports",
-  token: "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",
+  token: "",
 };
 
 const C = {
@@ -539,7 +539,7 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   const casesCreatedBy = await safeFetchCount("Cases Created",
     `incidents?$filter=_createdby_value eq ${oid} and createdon ge ${s}T${sT} and createdon le ${e}T${eT}&$select=incidentid`);
 
-  // Phone data now comes from 8x8 proxy — no D365 phonecalls queries needed
+  // Phone data now comes from the ServingIntel ACS metrics API — no D365 phonecalls queries needed
   const totalPhoneCalls = 0;
   const answeredLive = 0;
   const abandonedCalls = 0;
@@ -640,24 +640,61 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
   };
 }
 
-// ── 8x8 PHONE DATA VIA POWER AUTOMATE PROXY ──
-function process8x8CallLegs(rawLegs) {
-  if (!rawLegs || rawLegs.length === 0) return null;
+// ── SERVINGINTEL ACS PHONE DATA VIA METRICS API ──
+function getAcsDirection(record) {
+  const raw = (record.direction || record.callDirection || record.type || "").toLowerCase();
+  if (raw.includes("out")) return "Outgoing";
+  if (raw.includes("in")) return "Incoming";
+  return record.isOutbound ? "Outgoing" : "Incoming";
+}
+
+function getAcsAgentName(record) {
+  return record.agentName || record.agent || record.displayName || record.userName || record.assignedTo || record.ownerName || "";
+}
+
+function getAcsCallId(record, index) {
+  return record.callId || record.callConnectionId || record.id || record.sessionId || record.conversationId || `acs-${index}`;
+}
+
+function getAcsTalkMs(record) {
+  const raw = record.talkTimeMS ?? record.talkTimeMs ?? record.durationMs ?? record.durationMilliseconds;
+  if (raw != null) return parseInt(raw) || 0;
+  const seconds = record.durationSeconds ?? record.talkTimeSeconds ?? record.duration;
+  return seconds != null ? (parseFloat(seconds) || 0) * 1000 : 0;
+}
+
+function isAcsAnswered(record) {
+  const status = (record.answered || record.status || record.outcome || record.disposition || "").toString().toLowerCase();
+  if (record.wasAnswered === true || record.answered === true || record.connected === true) return true;
+  if (["answered", "connected", "completed", "transferred", "accepted"].some(v => status.includes(v))) return true;
+  return Boolean(record.connectedAt || record.answerTime || record.acceptedAt);
+}
+
+function processAcsCallRecords(rawRecords) {
+  if (!rawRecords || rawRecords.length === 0) return null;
 
   // Agent-answered legs: the actual person who picked up or made the call
-  const agentLegs = rawLegs.filter(leg =>
-    leg.answered === "Answered" && !leg.calleeSvcName
-  );
+  const records = rawRecords.map((record, index) => ({
+    ...record,
+    callId: getAcsCallId(record, index),
+    direction: getAcsDirection(record),
+    answered: isAcsAnswered(record),
+    agentName: getAcsAgentName(record),
+    talkMs: getAcsTalkMs(record),
+    startTime: record.startTime || record.createdAt || record.connectedAt || record.timestamp || record.callStartTime || "",
+  }));
+
+  const agentRecords = records.filter(record => record.answered && record.agentName);
 
   // Unique callIds by type
   const incomingIds = new Set();
   const outgoingIds = new Set();
-  rawLegs.forEach(l => {
+  records.forEach(l => {
     if (l.direction === "Incoming") incomingIds.add(l.callId);
     else if (l.direction === "Outgoing") outgoingIds.add(l.callId);
   });
 
-  const answeredIds = new Set(agentLegs.map(l => l.callId));
+  const answeredIds = new Set(agentRecords.map(l => l.callId));
   const answeredIncoming = [...incomingIds].filter(id => answeredIds.has(id)).length;
   const abandonedIncoming = incomingIds.size - answeredIncoming;
   const totalCalls = incomingIds.size + outgoingIds.size;
@@ -665,14 +702,14 @@ function process8x8CallLegs(rawLegs) {
 
   // Per-agent breakdown
   const agentMap = {};
-  for (const leg of agentLegs) {
-    const name = leg.direction === "Outgoing" ? leg.callerName : leg.calleeName;
+  for (const leg of agentRecords) {
+    const name = leg.agentName;
     if (!name || name === "New main Auto Attendant" || name === "Service Desk Queue") continue;
     if (!agentMap[name]) agentMap[name] = { total: 0, answered: 0, incoming: 0, outgoing: 0, abandoned: 0, talkMs: 0, count: 0 };
     const a = agentMap[name];
     a.total++; a.answered++; a.count++;
     if (leg.direction === "Incoming") a.incoming++; else a.outgoing++;
-    a.talkMs += parseInt(leg.talkTimeMS) || 0;
+    a.talkMs += leg.talkMs || 0;
   }
 
   // Calculate AHT per agent
@@ -686,16 +723,16 @@ function process8x8CallLegs(rawLegs) {
 
   // Overall AHT
   let avgAHT = "N/A";
-  if (agentLegs.length > 0) {
-    const totalMs = agentLegs.reduce((s, l) => s + (parseInt(l.talkTimeMS) || 0), 0);
-    const avg = Math.round(totalMs / agentLegs.length / 60000);
+  if (agentRecords.length > 0) {
+    const totalMs = agentRecords.reduce((s, l) => s + (l.talkMs || 0), 0);
+    const avg = Math.round(totalMs / agentRecords.length / 60000);
     avgAHT = avg > 0 ? `${avg} min` : "< 1 min";
   }
 
   // Timeline per day
   const dayMap = {};
   const countedByDay = {};
-  for (const leg of rawLegs) {
+  for (const leg of records) {
     const day = (leg.startTime || "").slice(0, 10);
     if (!day) continue;
     const key = `${day}-${leg.callId}`;
@@ -711,16 +748,16 @@ function process8x8CallLegs(rawLegs) {
     summary: { totalCalls, answered: totalAnswered, abandoned: abandonedIncoming, answerRate: totalCalls > 0 ? Math.min(100, Math.round(totalAnswered / totalCalls * 100)) : 0, avgAHT, incoming: incomingIds.size, outgoing: outgoingIds.size },
     agents: agentMap,
     timeline: dayMap,
-    source: "8x8",
-    totalLegs: rawLegs.length,
+    source: "ACS",
+    totalRecords: rawRecords.length,
   };
 }
 
-async function fetch8x8PhoneData(flowUrl, startDate, endDate, startTime, endTime, onProgress) {
-  if (!flowUrl) return null;
-  onProgress?.("📞 Fetching 8x8 phone data...");
+async function fetchAcsPhoneData(metricsUrl, startDate, endDate, startTime, endTime, onProgress) {
+  if (!metricsUrl) return null;
+  onProgress?.("📞 Fetching ServingIntel ACS phone data...");
   try {
-    const resp = await fetch(flowUrl, {
+    const resp = await fetch(metricsUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -728,20 +765,20 @@ async function fetch8x8PhoneData(flowUrl, startDate, endDate, startTime, endTime
         endTime: `${endDate} ${endTime || "23:59"}:00`,
       }),
     });
-    if (!resp.ok) throw new Error(`8x8 proxy returned ${resp.status}: ${resp.statusText}`);
+    if (!resp.ok) throw new Error(`ACS metrics API returned ${resp.status}: ${resp.statusText}`);
     const data = await resp.json();
-    const legs = data.data || data.value || data || [];
-    if (!Array.isArray(legs)) throw new Error("Unexpected response format from 8x8 proxy");
-    onProgress?.(`📞 Processing ${legs.length} call legs...`);
-    return process8x8CallLegs(legs);
+    const records = data.data || data.value || data.calls || data.records || data || [];
+    if (!Array.isArray(records)) throw new Error("Unexpected response format from ACS metrics API");
+    onProgress?.(`📞 Processing ${records.length} ACS call records...`);
+    return processAcsCallRecords(records);
   } catch (err) {
-    console.error("[8x8] Fetch error:", err);
-    onProgress?.(`📞 8x8 error: ${err.message}`);
+    console.error("[ACS Phone] Fetch error:", err);
+    onProgress?.(`📞 ACS phone error: ${err.message}`);
     return null;
   }
 }
 
-function match8x8AgentToMember(agentData, memberName) {
+function matchAcsAgentToMember(agentData, memberName) {
   if (!agentData || !memberName) return null;
   // Try exact match first, then partial
   const lower = memberName.toLowerCase();
@@ -755,161 +792,6 @@ function match8x8AgentToMember(agentData, memberName) {
     if (parts.every(p => nameLower.includes(p))) return stats;
   }
   return null;
-}
-
-// ── 8x8 AGENT STATUS MONITOR ──
-const AGENT_STATUS_COLORS = {
-  available: "#4CAF50", Available: "#4CAF50",
-  "on call": "#2196F3", "On Call": "#2196F3", oncall: "#2196F3", OnCall: "#2196F3",
-  ringing: "#FF9800", Ringing: "#FF9800",
-  away: "#FFC107", Away: "#FFC107", idle: "#FFC107", Idle: "#FFC107",
-  dnd: "#f44336", DND: "#f44336", "Do Not Disturb": "#f44336", busy: "#f44336", Busy: "#f44336",
-  offline: "#9e9e9e", Offline: "#9e9e9e", "logged out": "#9e9e9e", "Logged Out": "#9e9e9e",
-  wrap: "#9C27B0", "Wrap Up": "#9C27B0", wrapup: "#9C27B0", WrapUp: "#9C27B0",
-};
-const AGENT_STATUS_LABELS = {
-  available: "Available", oncall: "On Call", "on call": "On Call", ringing: "Ringing",
-  away: "Away", idle: "Idle", dnd: "DND", busy: "Busy", offline: "Offline",
-  "logged out": "Logged Out", wrap: "Wrap Up", wrapup: "Wrap Up",
-};
-
-async function fetch8x8AgentStatus(flowUrl) {
-  if (!flowUrl) return null;
-  try {
-    const resp = await fetch(flowUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "status" }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    // Normalize: expect array of { name, status, extension?, ... }
-    const agents = data.data || data.value || data.agents || data || [];
-    if (!Array.isArray(agents)) return null;
-    return agents.map(a => ({
-      name: a.displayName || a.name || a.agentName || a.userName || "Unknown",
-      status: (a.status || a.state || a.agentStatus || a.presence || "offline").toLowerCase(),
-      extension: a.extension || a.ext || a.phoneNumber || "",
-      queue: a.queueName || a.queue || "",
-      since: a.statusSince || a.since || a.lastStatusChange || "",
-    }));
-  } catch (err) {
-    console.error("[8x8 Status]", err);
-    return null;
-  }
-}
-
-function AgentMonitor({ teamMembers }) {
-  const [agents, setAgents] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [error, setError] = useState(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const flowUrl = localStorage.getItem("8x8StatusFlowUrl");
-
-  const fetchStatus = async () => {
-    if (!flowUrl) return;
-    setLoading(true); setError(null);
-    const data = await fetch8x8AgentStatus(flowUrl);
-    if (data) {
-      setAgents(data);
-      setLastUpdate(new Date());
-    } else {
-      setError("Could not fetch status");
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    if (!flowUrl) return;
-    fetchStatus();
-    const timer = setInterval(fetchStatus, 30000); // poll every 30s
-    return () => clearInterval(timer);
-  }, [flowUrl]);
-
-  if (!flowUrl) return null;
-
-  const getColor = (status) => AGENT_STATUS_COLORS[status] || AGENT_STATUS_COLORS[status?.toLowerCase()] || "#9e9e9e";
-  const getLabel = (status) => AGENT_STATUS_LABELS[status] || AGENT_STATUS_LABELS[status?.toLowerCase()] || status || "Unknown";
-
-  // Match to team members if available
-  const displayAgents = agents ? agents.map(a => {
-    const member = teamMembers?.find(m => {
-      const mLower = m.name.toLowerCase();
-      const aLower = a.name.toLowerCase();
-      return mLower === aLower || aLower.includes(mLower) || mLower.includes(aLower);
-    });
-    return { ...a, avatar: member?.avatar || a.name?.substring(0, 2)?.toUpperCase(), isMember: !!member };
-  }).sort((a, b) => {
-    // Sort: on call first, then available, then away, then offline
-    const order = { "on call": 0, oncall: 0, ringing: 1, available: 2, busy: 3, dnd: 3, wrap: 4, wrapup: 4, away: 5, idle: 5, offline: 6, "logged out": 6 };
-    return (order[a.status] ?? 9) - (order[b.status] ?? 9);
-  }) : [];
-
-  const statusCounts = {};
-  displayAgents.forEach(a => {
-    const label = getLabel(a.status);
-    statusCounts[label] = (statusCounts[label] || 0) + 1;
-  });
-
-  return (
-    <div style={{ marginTop: 16, background: C.bg, borderRadius: 12, border: `1.5px solid ${C.border}`, overflow: "hidden" }}>
-      <div onClick={() => setCollapsed(!collapsed)} style={{ padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", background: `linear-gradient(135deg, #00BFA510, #00BFA505)` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14 }}>📞</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.textDark }}>Agent Status</span>
-          <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>LIVE</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {loading && <span style={{ fontSize: 10, color: C.textLight, animation: "pulse 1s infinite" }}>⏳</span>}
-          <span style={{ fontSize: 12, color: C.textLight, transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
-        </div>
-      </div>
-      {!collapsed && (
-        <div style={{ padding: "0 14px 12px" }}>
-          {/* Status summary bar */}
-          {Object.keys(statusCounts).length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, marginTop: 8 }}>
-              {Object.entries(statusCounts).map(([label, count]) => (
-                <span key={label} style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: `${getColor(label.toLowerCase())}18`, color: getColor(label.toLowerCase()), border: `1px solid ${getColor(label.toLowerCase())}30` }}>
-                  {count} {label}
-                </span>
-              ))}
-            </div>
-          )}
-          {/* Agent list */}
-          {displayAgents.length > 0 ? (
-            <div style={{ maxHeight: 280, overflowY: "auto" }}>
-              {displayAgents.map((a, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: i < displayAgents.length - 1 ? `1px solid ${C.border}` : "none" }}>
-                  <div style={{ position: "relative", flexShrink: 0 }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 8, background: `${getColor(a.status)}18`, border: `1.5px solid ${getColor(a.status)}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: getColor(a.status) }}>{a.avatar}</div>
-                    <div style={{ position: "absolute", bottom: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: getColor(a.status), border: "2px solid #F4F1EC" }} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: C.textDark, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</div>
-                    <div style={{ fontSize: 9, color: getColor(a.status), fontWeight: 600 }}>{getLabel(a.status)}{a.queue ? ` · ${a.queue}` : ""}</div>
-                  </div>
-                  {a.extension && <div style={{ fontSize: 9, color: C.textLight, fontFamily: "'Space Mono', monospace" }}>{a.extension}</div>}
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div style={{ fontSize: 11, color: C.red, padding: "8px 0" }}>❌ {error}</div>
-          ) : (
-            <div style={{ fontSize: 11, color: C.textLight, padding: "8px 0", textAlign: "center" }}>Loading agent status...</div>
-          )}
-          {/* Last updated */}
-          {lastUpdate && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
-              <span style={{ fontSize: 9, color: C.textLight }}>Updated {lastUpdate.toLocaleTimeString()}</span>
-              <button onClick={fetchStatus} disabled={loading} style={{ fontSize: 9, color: "#00BFA5", background: "none", border: "none", cursor: "pointer", fontWeight: 600, fontFamily: "'DM Sans', sans-serif" }}>{loading ? "⏳" : "↻"} Refresh</button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endTime) {
@@ -1111,7 +993,7 @@ async function fetchLiveD365Data(startDate, endDate, onProgress, startTime, endT
     }
   } catch (err) { errors.push(`Resolution time: ${err.message}`); }
 
-  // Phone data now comes from 8x8 proxy — no D365 phonecalls queries needed
+  // Phone data now comes from the ServingIntel ACS metrics API — no D365 phonecalls queries needed
 
   let timelineData = [];
   try {
@@ -1217,26 +1099,26 @@ async function fetchLiveData(config, startDate, endDate, onProgress, startTime, 
   progress("Connecting to Dynamics 365...");
   const d365Data = await fetchLiveD365Data(startDate, endDate, progress, startTime, endTime);
 
-  // Phone data comes exclusively from 8x8 proxy
+  // Phone data comes from ServingIntel ACS when a metrics API URL is configured
   let phoneData = { totalCalls: 0, answered: 0, abandoned: 0, incoming: 0, outgoing: 0, answerRate: 0, avgAHT: "N/A", voicemails: 0 };
-  let phone8x8 = null;
-  const flowUrl = localStorage.getItem("8x8FlowUrl");
-  if (flowUrl) {
-    phone8x8 = await fetch8x8PhoneData(flowUrl, startDate, endDate, startTime, endTime, progress);
-    if (phone8x8?.summary) {
-      phoneData = { ...phone8x8.summary, voicemails: 0 };
-      progress("📞 8x8 phone data loaded successfully!");
-      // Merge 8x8 timeline into D365 timeline
-      if (phone8x8.timeline && d365Data.timeline?.length > 0) {
+  let phoneAcs = null;
+  const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl");
+  if (acsMetricsUrl) {
+    phoneAcs = await fetchAcsPhoneData(acsMetricsUrl, startDate, endDate, startTime, endTime, progress);
+    if (phoneAcs?.summary) {
+      phoneData = { ...phoneAcs.summary, voicemails: 0 };
+      progress("📞 ServingIntel ACS phone data loaded successfully!");
+      // Merge ACS timeline into D365 timeline
+      if (phoneAcs.timeline && d365Data.timeline?.length > 0) {
         for (const day of d365Data.timeline) {
-          const t = phone8x8.timeline[day.dateKey];
+          const t = phoneAcs.timeline[day.dateKey];
           if (t) day.calls = t.total || 0;
         }
       }
     }
   }
 
-  // Update overall with 8x8 phone data
+  // Update overall with ACS phone data
   if (d365Data.overall) {
     d365Data.overall.answeredCalls = phoneData.answered;
     d365Data.overall.abandonedCalls = phoneData.abandoned;
@@ -1246,7 +1128,7 @@ async function fetchLiveData(config, startDate, endDate, onProgress, startTime, 
   return {
     ...d365Data,
     phone: phoneData,
-    phone8x8,
+    phoneAcs,
     source: "live",
     errors: d365Data.errors || [],
   };
@@ -1281,13 +1163,13 @@ function buildAutoEmailHTML(data, dateLabel) {
   </div>
   <table style="width:100%;border-collapse:separate;border-spacing:12px 0;margin-bottom:16px;"><tr>
     <td style="width:50%;vertical-align:top;background:#fff;border-radius:10px;padding:14px 16px;">
-      <strong style="font-size:12px;color:#2D9D78;">📞 Phone${data.phone8x8 ? ' <span style="font-size:8px;background:#00BFA5;color:#fff;padding:1px 4px;border-radius:3px;">8x8</span>' : ''}</strong>
+      <strong style="font-size:12px;color:#2D9D78;">📞 Phone${data.phoneAcs ? ' <span style="font-size:8px;background:#00BFA5;color:#fff;padding:1px 4px;border-radius:3px;">ACS</span>' : ''}</strong>
       <table style="width:100%;font-size:12px;margin-top:8px;">
         ${row("Total", ph.totalCalls||0)}
         ${row("Answered", `<span style="color:#2D9D78">${ph.answered||0}</span>`)}
         ${row("Abandoned", `<span style="color:#E5544B">${ph.abandoned||0}</span>`)}
-        ${data.phone8x8 ? row("Incoming", `<span style="color:#1565c0">${ph.incoming||0}</span>`) : ""}
-        ${data.phone8x8 ? row("Outgoing", `<span style="color:#7b1fa2">${ph.outgoing||0}</span>`) : ""}
+        ${data.phoneAcs ? row("Incoming", `<span style="color:#1565c0">${ph.incoming||0}</span>`) : ""}
+        ${data.phoneAcs ? row("Outgoing", `<span style="color:#7b1fa2">${ph.outgoing||0}</span>`) : ""}
         ${row("Answer Rate", `${fm(ph.answerRate)} ${ic(ph.answerRate, 95, false)}`)}
       </table>
     </td>
@@ -1592,14 +1474,14 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
           <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 20 }}>📞</span> PHONE METRICS
-              {data.phone8x8 && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>8x8 LIVE</span>}
-              {!data.phone8x8 && <span style={{ fontSize: 9, background: C.d365, color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>D365</span>}
+              {data.phoneAcs && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>ACS LIVE</span>}
+              {!data.phoneAcs && <span style={{ fontSize: 9, background: C.d365, color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>D365</span>}
             </div>
             <MR icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
             <MR icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
             <MR icon="❌" label="Abandoned Calls" value={abandoned} accent="#E5544B" badge={abandoned > 0 ? "miss" : "met"} />
-            {data.phone8x8 && <MR icon="📥" label="Incoming" value={data.phone.incoming ?? 0} accent="#1565c0" />}
-            {data.phone8x8 && <MR icon="📤" label="Outgoing" value={data.phone.outgoing ?? 0} accent="#7b1fa2" />}
+            {data.phoneAcs && <MR icon="📥" label="Incoming" value={data.phone.incoming ?? 0} accent="#1565c0" />}
+            {data.phoneAcs && <MR icon="📤" label="Outgoing" value={data.phone.outgoing ?? 0} accent="#7b1fa2" />}
             <MR icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
             <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
@@ -1861,13 +1743,13 @@ function MemberSection({ memberData, index, metricFilter = "all" }) {
         <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 20 }}>📞</span> Phone Activity
-            {d.phoneSource === "8x8" && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>8x8 LIVE</span>}
+            {d.phoneSource === "ACS" && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>ACS LIVE</span>}
           </div>
           <PhoneStat icon="📞" label="Total Calls" value={d.totalPhoneCalls ?? 0} accent={C.textDark} />
           <PhoneStat icon="✅" label="Answered Calls" value={d.answeredLive ?? 0} accent="#2D9D78" />
-          {d.phoneSource === "8x8" && <PhoneStat icon="📥" label="Incoming" value={d.incomingCalls ?? 0} accent="#1565c0" />}
-          {d.phoneSource === "8x8" && <PhoneStat icon="📤" label="Outgoing" value={d.outgoingCalls ?? 0} accent="#7b1fa2" />}
-          {d.phoneSource !== "8x8" && <PhoneStat icon="❌" label="Abandoned Calls" value={d.voicemails ?? 0} accent="#E5544B" />}
+          {d.phoneSource === "ACS" && <PhoneStat icon="📥" label="Incoming" value={d.incomingCalls ?? 0} accent="#1565c0" />}
+          {d.phoneSource === "ACS" && <PhoneStat icon="📤" label="Outgoing" value={d.outgoingCalls ?? 0} accent="#7b1fa2" />}
+          {d.phoneSource !== "ACS" && <PhoneStat icon="❌" label="Abandoned Calls" value={d.voicemails ?? 0} accent="#E5544B" />}
           <PhoneStat icon="⏱️" label="Avg Phone AHT" value={d.memberAHT ?? "N/A"} accent={C.textMid} />
         </div>
       )}
@@ -2008,7 +1890,7 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
   const [local, setLocal] = useState(config);
   const [d365Status, setD365Status] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
-  const [flowUrl, setFlowUrl] = useState(localStorage.getItem("8x8FlowUrl") || "");
+  const [acsMetricsUrl, setAcsMetricsUrl] = useState(localStorage.getItem("acsPhoneMetricsUrl") || "");
   const [flowTestStatus, setFlowTestStatus] = useState(null);
   useEffect(() => { setLocal(config); }, [config]);
   if (!show) return null;
@@ -2055,44 +1937,44 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
               💡 Requires <strong>Mail.Send</strong> permission on your Azure App Registration. A consent popup will appear on first use.
             </div>
           </div>
-          {/* ── 8x8 PHONE DATA SECTION ── */}
+          {/* ── ACS PHONE DATA SECTION ── */}
           <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ width: 32, height: 32, borderRadius: 8, background: "#00BFA5", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>📞</div>
-              <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>8x8 Phone Data</div><div style={{ fontSize: 10, color: C.textMid }}>Live call data via Power Automate HTTP proxy</div></div>
+              <div><div style={{ fontSize: 14, fontWeight: 700, color: C.textDark }}>ServingIntel ACS Phone Data</div><div style={{ fontSize: 10, color: C.textMid }}>Live call data via ACS metrics API</div></div>
             </div>
             <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>Power Automate Flow URL</div>
-              <input type="url" value={flowUrl} onChange={e => setFlowUrl(e.target.value)} placeholder="https://prod-xx.westus.logic.azure.com:443/workflows/..."
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.textDark, marginBottom: 6 }}>ACS Metrics API URL</div>
+              <input type="url" value={acsMetricsUrl} onChange={e => setAcsMetricsUrl(e.target.value)} placeholder="https://your-servingintel-acs-app.azurewebsites.net/api/phone-metrics"
                 style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 12, fontFamily: "'DM Sans', sans-serif", background: C.bg, color: C.textDark, outline: "none", boxSizing: "border-box" }} />
-              <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>Paste the HTTP POST URL from your "8x8 Call Legs Proxy" flow</div>
+              <div style={{ fontSize: 10, color: C.textLight, marginTop: 4 }}>Paste the HTTP POST URL for your ServingIntel ACS call metrics endpoint</div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button onClick={async () => {
-                if (!flowUrl) { setFlowTestStatus({ ok: false, msg: "Enter a flow URL first" }); return; }
+                if (!acsMetricsUrl) { setFlowTestStatus({ ok: false, msg: "Enter an ACS metrics API URL first" }); return; }
                 setFlowTestStatus({ ok: null, msg: "Testing..." });
                 try {
                   const today = new Date().toISOString().slice(0, 10);
-                  const resp = await fetch(flowUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startTime: `${today} 00:00:00`, endTime: `${today} 23:59:00` }) });
+                  const resp = await fetch(acsMetricsUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startTime: `${today} 00:00:00`, endTime: `${today} 23:59:00` }) });
                   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                   const data = await resp.json();
-                  const legs = data.data || data.value || data || [];
-                  setFlowTestStatus({ ok: true, msg: `✅ Connected! ${Array.isArray(legs) ? legs.length : 0} call legs returned` });
+                  const records = data.data || data.value || data.calls || data.records || data || [];
+                  setFlowTestStatus({ ok: true, msg: `✅ Connected! ${Array.isArray(records) ? records.length : 0} ACS call records returned` });
                 } catch (err) { setFlowTestStatus({ ok: false, msg: `❌ ${err.message}` }); }
               }} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid #00BFA5`, background: "#00BFA508", color: "#00BFA5", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Test Connection</button>
-              {flowUrl && <button onClick={() => { setFlowUrl(""); setFlowTestStatus(null); }} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.textLight, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Clear</button>}
+              {acsMetricsUrl && <button onClick={() => { setAcsMetricsUrl(""); setFlowTestStatus(null); }} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.textLight, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Clear</button>}
             </div>
             {flowTestStatus && (<div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, fontSize: 11, background: flowTestStatus.ok === true ? C.greenLight : flowTestStatus.ok === false ? C.redLight : C.bg, color: flowTestStatus.ok === true ? C.green : flowTestStatus.ok === false ? C.red : C.textMid }}>{flowTestStatus.msg}</div>)}
             <div style={{ fontSize: 11, color: C.textMid, lineHeight: 1.6, padding: "8px 12px", background: C.bg, borderRadius: 8, marginTop: 10 }}>
-              📞 Fetches live call-legs data from 8x8 Analytics API via Power Automate proxy.<br/>
-              🔒 No CORS issues — Power Automate handles 8x8 auth server-side.<br/>
-              👤 Auto-matches agents to team members for per-person phone metrics.
+              📞 Fetches live call data from your ServingIntel ACS metrics endpoint.<br/>
+              🔒 Keep ACS credentials server-side; GitHub Pages should call only a protected proxy/API.<br/>
+              👤 Auto-matches ACS agent names to team members for per-person phone metrics.
             </div>
           </div>
         </div>
         <div style={{ padding: "16px 28px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button onClick={onClose} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${C.border}`, background: "transparent", fontSize: 13, fontWeight: 600, color: C.textMid, cursor: "pointer" }}>Cancel</button>
-          <button onClick={() => { localStorage.setItem("8x8FlowUrl", flowUrl); onSave(local); onClose(); }} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: C.primary, fontSize: 13, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Save</button>
+          <button onClick={() => { localStorage.setItem("acsPhoneMetricsUrl", acsMetricsUrl); onSave(local); onClose(); }} style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: C.primary, fontSize: 13, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Save</button>
         </div>
       </div>
     </div>
@@ -2805,11 +2687,11 @@ function Dashboard({ user, onLogout }) {
   const handleRun = async () => {
     setIsRunning(true); setRunProgress(""); setLiveErrors([]); setMemberData([]);
     try {
-      // Fetch 8x8 data if configured (used by both member and all-tiers)
-      let phone8x8 = null;
-      const flowUrl = localStorage.getItem("8x8FlowUrl");
-      if (flowUrl) {
-        phone8x8 = await fetch8x8PhoneData(flowUrl, startDate, endDate, startTime, endTime, setRunProgress);
+      // Fetch ACS phone data if configured (used by both member and all-tiers)
+      let phoneAcs = null;
+      const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl");
+      if (acsMetricsUrl) {
+        phoneAcs = await fetchAcsPhoneData(acsMetricsUrl, startDate, endDate, startTime, endTime, setRunProgress);
       }
 
       if (selectedMembers.length > 0) {
@@ -2819,26 +2701,26 @@ function Dashboard({ user, onLogout }) {
           if (!member) continue;
           setRunProgress(`Fetching data for ${member.name}...`);
           const memberResult = await fetchMemberD365Data(member, startDate, endDate, setRunProgress, startTime, endTime);
-          // Merge 8x8 agent phone data if available
-          if (phone8x8?.agents) {
-            const agentPhone = match8x8AgentToMember(phone8x8.agents, member.name);
+          // Merge ACS agent phone data if available
+          if (phoneAcs?.agents) {
+            const agentPhone = matchAcsAgentToMember(phoneAcs.agents, member.name);
             if (agentPhone) {
               memberResult.totalPhoneCalls = agentPhone.total;
               memberResult.answeredLive = agentPhone.answered;
               memberResult.incomingCalls = agentPhone.incoming;
               memberResult.outgoingCalls = agentPhone.outgoing;
               memberResult.memberAHT = agentPhone.avgAHT;
-              memberResult.phoneSource = "8x8";
+              memberResult.phoneSource = "ACS";
             }
           }
           results.push(memberResult); allErrors.push(...(memberResult.errors || []));
         }
         setMemberData(results);
         const combined = buildCombinedData(results);
-        if (phone8x8?.summary) {
-          combined.phone = { ...phone8x8.summary, voicemails: 0 };
+        if (phoneAcs?.summary) {
+          combined.phone = { ...phoneAcs.summary, voicemails: 0 };
         }
-        combined.phone8x8 = phone8x8;
+        combined.phoneAcs = phoneAcs;
         setData({ ...combined, source: "live" });
         if (allErrors.length > 0) setLiveErrors(allErrors);
       } else {
@@ -2912,13 +2794,13 @@ function Dashboard({ user, onLogout }) {
       ${isTier1 ? row("CSAT Score", `${d.csatAvg || "N/A"}/5 ${d.csatAvg != null && d.csatAvg !== "N/A" && d.csatAvg >= 4 ? "✅" : (d.csatAvg === "N/A" || d.csatAvg == null ? "➖" : "🔴")}`) : ""}
     </table>
     ${isTier1 ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #eee;">
-      <div style="font-size:13px;font-weight:600;color:#E91E63;margin-bottom:8px;">📞 Phone Activity ${d.phoneSource === "8x8" ? '<span style="font-size:9px;background:#00BFA5;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">8x8 LIVE</span>' : ''}</div>
+      <div style="font-size:13px;font-weight:600;color:#E91E63;margin-bottom:8px;">📞 Phone Activity ${d.phoneSource === "ACS" ? '<span style="font-size:9px;background:#00BFA5;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">ACS LIVE</span>' : ''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         ${row("Total Calls", d.totalPhoneCalls ?? 0)}
         ${row("Answered", `<span style="color:#2D9D78">${d.answeredLive ?? 0}</span>`)}
-        ${d.phoneSource === "8x8" ? row("Incoming", `<span style="color:#1565c0">${d.incomingCalls ?? 0}</span>`) : ""}
-        ${d.phoneSource === "8x8" ? row("Outgoing", `<span style="color:#7b1fa2">${d.outgoingCalls ?? 0}</span>`) : ""}
-        ${d.phoneSource !== "8x8" ? row("Abandoned", `<span style="color:#E5544B">${d.voicemails ?? 0}</span>`) : ""}
+        ${d.phoneSource === "ACS" ? row("Incoming", `<span style="color:#1565c0">${d.incomingCalls ?? 0}</span>`) : ""}
+        ${d.phoneSource === "ACS" ? row("Outgoing", `<span style="color:#7b1fa2">${d.outgoingCalls ?? 0}</span>`) : ""}
+        ${d.phoneSource !== "ACS" ? row("Abandoned", `<span style="color:#E5544B">${d.voicemails ?? 0}</span>`) : ""}
         ${row("Avg AHT", d.memberAHT ?? "N/A")}
       </table>
     </div>` : ""}
@@ -3200,8 +3082,6 @@ function Dashboard({ user, onLogout }) {
               {[{ l: "7D", s: 7 }, { l: "14D", s: 14 }, { l: "30D", s: 30 }, { l: "90D", s: 90 }, { l: "YTD", s: -1 }].map((q) => <button key={q.l} onClick={() => { const e = new Date(), sD = new Date(); if (q.s === -1) { sD.setMonth(0); sD.setDate(1); } else { sD.setDate(sD.getDate() - q.s); } setStartDate(sD.toISOString().split("T")[0]); setEndDate(e.toISOString().split("T")[0]); setStartTime("00:00"); setEndTime("23:59"); setReportType("custom"); }} style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", fontSize: 10, fontWeight: 600, color: C.textMid, cursor: "pointer", fontFamily: "'Space Mono', monospace" }}>{q.l}</button>)}
             </div>
           </div>
-          {/* 8x8 Agent Status Monitor */}
-          <AgentMonitor teamMembers={teamMembers} />
           <div style={{ flex: 1 }} />
           <button onClick={handleRun} disabled={!canRun || isRunning} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: canRun ? `linear-gradient(135deg, ${C.accent}, ${C.yellow})` : C.border, color: canRun ? "#fff" : C.textLight, fontSize: 15, fontWeight: 700, cursor: canRun ? "pointer" : "not-allowed", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: canRun ? "0 4px 20px rgba(232,101,58,0.35)" : "none", opacity: isRunning ? 0.7 : 1 }}>
             {isRunning ? <><span style={{ animation: "pulse 1s infinite" }}>⏳</span> {runProgress || "Generating..."}</> : <><span style={{ fontSize: 18 }}>▶</span> Run Report (Live)</>}
