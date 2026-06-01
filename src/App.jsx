@@ -28,6 +28,7 @@ const MSAL_CONFIG = {
 const D365_SCOPE = "https://servingintel.crm.dynamics.com/user_impersonation";
 const D365_BASE = "https://servingintel.crm.dynamics.com/api/data/v9.2";
 const GRAPH_SCOPE = "Mail.Send";
+const ACS_PHONE_METRICS_URL = "https://si-genesis-voice-dev-b2dbd8esfzaxdecq.westus2-01.azurewebsites.net/api/conversations";
 
 let msalInstance = null;
 function getMsal() {
@@ -649,23 +650,24 @@ function getAcsDirection(record) {
 }
 
 function getAcsAgentName(record) {
-  return record.agentName || record.agent || record.displayName || record.userName || record.assignedTo || record.ownerName || "";
+  return record.agentName || record.agent || record.displayName || record.userName || record.assignedTo || record.ownerName || record.TransferredTo || record.CallerName || "";
 }
 
 function getAcsCallId(record, index) {
-  return record.callId || record.callConnectionId || record.id || record.sessionId || record.conversationId || `acs-${index}`;
+  return record.callId || record.callConnectionId || record.CallConnectionId || record.id || record.sessionId || record.conversationId || record.ConversationId || `acs-${index}`;
 }
 
 function getAcsTalkMs(record) {
   const raw = record.talkTimeMS ?? record.talkTimeMs ?? record.durationMs ?? record.durationMilliseconds;
   if (raw != null) return parseInt(raw) || 0;
-  const seconds = record.durationSeconds ?? record.talkTimeSeconds ?? record.duration;
+  const seconds = record.durationSeconds ?? record.DurationSeconds ?? record.talkTimeSeconds ?? record.duration;
   return seconds != null ? (parseFloat(seconds) || 0) * 1000 : 0;
 }
 
 function isAcsAnswered(record) {
-  const status = (record.answered || record.status || record.outcome || record.disposition || "").toString().toLowerCase();
+  const status = (record.answered || record.status || record.outcome || record.disposition || record.Resolution || "").toString().toLowerCase();
   if (record.wasAnswered === true || record.answered === true || record.connected === true) return true;
+  if (record.EndTime || record.endTime) return true;
   if (["answered", "connected", "completed", "transferred", "accepted"].some(v => status.includes(v))) return true;
   return Boolean(record.connectedAt || record.answerTime || record.acceptedAt);
 }
@@ -681,7 +683,7 @@ function processAcsCallRecords(rawRecords) {
     answered: isAcsAnswered(record),
     agentName: getAcsAgentName(record),
     talkMs: getAcsTalkMs(record),
-    startTime: record.startTime || record.createdAt || record.connectedAt || record.timestamp || record.callStartTime || "",
+    startTime: record.startTime || record.StartTime || record.createdAt || record.connectedAt || record.timestamp || record.callStartTime || "",
   }));
 
   const agentRecords = records.filter(record => record.answered && record.agentName);
@@ -757,17 +759,28 @@ async function fetchAcsPhoneData(metricsUrl, startDate, endDate, startTime, endT
   if (!metricsUrl) return null;
   onProgress?.("📞 Fetching ServingIntel ACS phone data...");
   try {
-    const resp = await fetch(metricsUrl, {
+    const startValue = `${startDate} ${startTime || "00:00"}:00`;
+    const endValue = `${endDate} ${endTime || "23:59"}:00`;
+    const url = new URL(metricsUrl);
+    const useConversationsEndpoint = url.pathname.endsWith("/api/conversations");
+    let fetchUrl = metricsUrl;
+    let fetchOptions = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        startTime: `${startDate} ${startTime || "00:00"}:00`,
-        endTime: `${endDate} ${endTime || "23:59"}:00`,
-      }),
-    });
+      body: JSON.stringify({ startTime: startValue, endTime: endValue }),
+    };
+    if (useConversationsEndpoint) {
+      const startDateTime = new Date(startValue.replace(" ", "T"));
+      const endDateTime = new Date(endValue.replace(" ", "T"));
+      const hours = Math.max(1, Math.ceil((endDateTime - startDateTime) / 3600000));
+      url.searchParams.set("hours", String(hours));
+      fetchUrl = url.toString();
+      fetchOptions = { method: "GET" };
+    }
+    const resp = await fetch(fetchUrl, fetchOptions);
     if (!resp.ok) throw new Error(`ACS metrics API returned ${resp.status}: ${resp.statusText}`);
     const data = await resp.json();
-    const records = data.data || data.value || data.calls || data.records || data || [];
+    const records = data.data || data.value || data.calls || data.records || data.conversations || data || [];
     if (!Array.isArray(records)) throw new Error("Unexpected response format from ACS metrics API");
     onProgress?.(`📞 Processing ${records.length} ACS call records...`);
     return processAcsCallRecords(records);
@@ -1102,7 +1115,7 @@ async function fetchLiveData(config, startDate, endDate, onProgress, startTime, 
   // Phone data comes from ServingIntel ACS when a metrics API URL is configured
   let phoneData = { totalCalls: 0, answered: 0, abandoned: 0, incoming: 0, outgoing: 0, answerRate: 0, avgAHT: "N/A", voicemails: 0 };
   let phoneAcs = null;
-  const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl");
+  const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl") || ACS_PHONE_METRICS_URL;
   if (acsMetricsUrl) {
     phoneAcs = await fetchAcsPhoneData(acsMetricsUrl, startDate, endDate, startTime, endTime, progress);
     if (phoneAcs?.summary) {
@@ -1890,7 +1903,7 @@ function SettingsModal({ show, onClose, config, onSave, d365Account, onD365Login
   const [local, setLocal] = useState(config);
   const [d365Status, setD365Status] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
-  const [acsMetricsUrl, setAcsMetricsUrl] = useState(localStorage.getItem("acsPhoneMetricsUrl") || "");
+  const [acsMetricsUrl, setAcsMetricsUrl] = useState(localStorage.getItem("acsPhoneMetricsUrl") || ACS_PHONE_METRICS_URL);
   const [flowTestStatus, setFlowTestStatus] = useState(null);
   useEffect(() => { setLocal(config); }, [config]);
   if (!show) return null;
@@ -2689,7 +2702,7 @@ function Dashboard({ user, onLogout }) {
     try {
       // Fetch ACS phone data if configured (used by both member and all-tiers)
       let phoneAcs = null;
-      const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl");
+      const acsMetricsUrl = localStorage.getItem("acsPhoneMetricsUrl") || ACS_PHONE_METRICS_URL;
       if (acsMetricsUrl) {
         phoneAcs = await fetchAcsPhoneData(acsMetricsUrl, startDate, endDate, startTime, endTime, setRunProgress);
       }
