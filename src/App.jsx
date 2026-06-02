@@ -1479,14 +1479,17 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
         csatAvg: tier === 1 && data.csat ? data.csat.avgScore : "N/A", csatResponses: tier === 1 && data.csat ? data.csat.responses : 0,
       }} />}
       {showPhone && (() => {
-        const totalCalls = data.phone.totalCalls ?? 0;
-        const answered = data.phone.answered ?? 0;
-        const abandoned = data.phone.abandoned ?? 0;
-        const answerRate = data.phone.answerRate ?? 0;
-        const avgAHT = data.phone.avgAHT ?? "N/A";
         const voiceReport = data.phoneReports?.report || {};
         const slaWatch = voiceReport.slaMetrics || [];
         const failureInsights = voiceReport.failureInsights || [];
+        const reportRows = data.phoneReports?.totalRecords ?? data.phone.totalCalls ?? 0;
+        const outboundCalls = data.phone.outgoing ?? 0;
+        const reportRowsList = voiceReport.activityRows || [];
+        const transferAttempts = reportRowsList.filter(row => row.classification === "Customer transfer").length;
+        const queueAnswered = reportRowsList.filter(row => row.transferResult === "Queue answered").length;
+        const failedTransfers = reportRowsList.filter(row => row.transferResult === "Failed").length;
+        const transferSuccess = slaWatch.find(metric => metric.label === "Transfer success")?.value || "N/A";
+        const avgQueueWait = slaWatch.find(metric => metric.label === "Average queue wait")?.value || "N/A";
         const MR = ({ icon, label, value, accent, badge }) => (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 17 }}>{icon}</span><span style={{ fontSize: 14, color: C.textMid }}>{label}</span></div>
@@ -1521,13 +1524,13 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
               {data.phoneReports && <span style={{ fontSize: 9, background: "#00BFA5", color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>TEAMS REPORTS</span>}
               {!data.phoneReports && <span style={{ fontSize: 9, background: C.gray, color: "#fff", padding: "2px 6px", borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>PHONE REPORTS OFF</span>}
             </div>
-            <MR icon="📞" label="Total Calls" value={totalCalls} accent={C.textDark} />
-            <MR icon="✅" label="Answered Calls" value={answered} accent="#2D9D78" badge="met" />
-            <MR icon="❌" label="Abandoned Calls" value={abandoned} accent="#E5544B" badge={abandoned > 0 ? "miss" : "met"} />
-            {data.phoneReports && <MR icon="📥" label="Incoming" value={data.phone.incoming ?? 0} accent="#1565c0" />}
-            {data.phoneReports && <MR icon="📤" label="Outgoing" value={data.phone.outgoing ?? 0} accent="#7b1fa2" />}
-            <MR icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
-            <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
+            <MR icon="📞" label="Report Rows" value={reportRows} accent={C.textDark} />
+            <MR icon="📤" label="Outbound Calls" value={outboundCalls} accent="#7b1fa2" />
+            <MR icon="📥" label="Transfer Attempts" value={transferAttempts} accent="#1565c0" />
+            <MR icon="✅" label="Queue Answered" value={queueAnswered} accent="#2D9D78" badge="met" />
+            <MR icon="❌" label="Failed Transfers" value={failedTransfers} accent="#E5544B" badge={failedTransfers > 0 ? "miss" : "met"} />
+            <MR icon="📊" label="Transfer Success" value={transferSuccess} accent={transferSuccess !== "N/A" && parseFloat(transferSuccess) >= 95 ? "#2D9D78" : "#E5544B"} badge={transferSuccess !== "N/A" && parseFloat(transferSuccess) >= 95 ? "met" : "miss"} />
+            <MR icon="⏱️" label="Avg Queue Wait" value={avgQueueWait} accent={C.textMid} />
           </div>
           {(slaWatch.length > 0 || failureInsights.length > 0) && (
             <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18 }}>
