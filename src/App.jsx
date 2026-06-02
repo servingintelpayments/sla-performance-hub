@@ -643,6 +643,9 @@ async function fetchMemberD365Data(member, startDate, endDate, onProgress, start
 
 // ── SERVINGINTEL PHONE DATA VIA EXISTING VOICE REPORTS ──
 function getReportDirection(record) {
+  const classification = (record.classification || "").toLowerCase();
+  if (classification.includes("customer transfer") || classification.includes("agent ring")) return "Incoming";
+  if (classification.includes("outbound")) return "Outgoing";
   const raw = (record.direction || record.callDirection || record.type || "").toLowerCase();
   if (raw.includes("out")) return "Outgoing";
   if (raw.includes("in")) return "Incoming";
@@ -704,6 +707,7 @@ function processVoiceReportCallRecords(rawRecords) {
   }));
 
   const agentRecords = records.filter(record => record.answered && record.agentName);
+  const handledRecords = records.filter(record => record.answered && record.talkMs > 0);
 
   // Unique callIds by type
   const incomingIds = new Set();
@@ -742,9 +746,9 @@ function processVoiceReportCallRecords(rawRecords) {
 
   // Overall AHT
   let avgAHT = "N/A";
-  if (agentRecords.length > 0) {
-    const totalMs = agentRecords.reduce((s, l) => s + (l.talkMs || 0), 0);
-    const avg = Math.round(totalMs / agentRecords.length / 60000);
+  if (handledRecords.length > 0) {
+    const totalMs = handledRecords.reduce((s, l) => s + (l.talkMs || 0), 0);
+    const avg = Math.round(totalMs / handledRecords.length / 60000);
     avgAHT = avg > 0 ? `${avg} min` : "< 1 min";
   }
 
@@ -1480,6 +1484,9 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
         const abandoned = data.phone.abandoned ?? 0;
         const answerRate = data.phone.answerRate ?? 0;
         const avgAHT = data.phone.avgAHT ?? "N/A";
+        const voiceReport = data.phoneReports?.report || {};
+        const slaWatch = voiceReport.slaMetrics || [];
+        const failureInsights = voiceReport.failureInsights || [];
         const MR = ({ icon, label, value, accent, badge }) => (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 0", borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 17 }}>{icon}</span><span style={{ fontSize: 14, color: C.textMid }}>{label}</span></div>
@@ -1489,6 +1496,24 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
             </div>
           </div>
         );
+        const reportPalette = {
+          good: { bg: "#E8F7F0", border: "#C4EBDD", text: "#006B55" },
+          watch: { bg: "#FFF8E8", border: "#F6E2AA", text: "#9A4A00" },
+          risk: { bg: "#FCEBED", border: "#F5C9CF", text: "#A0093B" },
+          info: { bg: "#EAF2FF", border: "#CFE0FA", text: "#1742A0" },
+          warning: { bg: "#FFF8E8", border: "#F6E2AA", text: "#9A4A00" },
+          critical: { bg: "#FCEBED", border: "#F5C9CF", text: "#A0093B" },
+        };
+        const ReportTile = ({ label, value, detail, status }) => {
+          const p = reportPalette[status] || reportPalette.info;
+          return (
+            <div style={{ background: p.bg, border: `1px solid ${p.border}`, borderRadius: 8, padding: "16px 18px", minHeight: 116 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: p.text, lineHeight: 1.35 }}>{label}</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: p.text, marginTop: 12, fontFamily: "'Space Mono', monospace" }}>{value}</div>
+              <div style={{ fontSize: 11, color: p.text, marginTop: 4, lineHeight: 1.35 }}>{detail}</div>
+            </div>
+          );
+        };
         return (<>
           <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#E91E63", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
@@ -1504,6 +1529,36 @@ function TierSection({ tier, data, members, metricFilter = "all" }) {
             <MR icon="📊" label="Answer Rate" value={`${answerRate}%`} accent={answerRate >= 95 ? "#2D9D78" : "#E5544B"} badge={answerRate >= 95 ? "met" : "miss"} />
             <MR icon="⏱️" label="Avg Phone AHT" value={avgAHT} accent={C.textMid} />
           </div>
+          {(slaWatch.length > 0 || failureInsights.length > 0) && (
+            <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18 }}>
+              {slaWatch.length > 0 && (
+                <div style={{ background: C.card, borderRadius: 14, padding: "22px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: C.textDark }}>SLA Watch</div>
+                    <div style={{ fontSize: 20, color: "#00897B" }}>â±</div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", gap: 12 }}>
+                    {slaWatch.map((metric) => (
+                      <ReportTile key={metric.label} label={metric.label} value={metric.value} detail={metric.target} status={metric.status} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {failureInsights.length > 0 && (
+                <div style={{ background: C.card, borderRadius: 14, padding: "22px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: C.textDark }}>Failure Insights</div>
+                    <div style={{ fontSize: 20, color: "#EF6C00" }}>âš </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+                    {failureInsights.map((insight) => (
+                      <ReportTile key={insight.title} label={insight.title} value={insight.count} detail={insight.detail} status={insight.severity} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {data.email && (
             <div style={{ marginTop: 20, background: C.card, borderRadius: 14, border: "none", padding: "22px 24px",  }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: C.blue, marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 20 }}>📧</span> EMAIL METRICS</div>
